@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
 import Button from '@/components/ui/button/Button.vue';
+import { Textarea } from '@/components/ui/textarea';
 
 const props = withDefaults(defineProps<{
     modelValue: string;
@@ -22,29 +22,6 @@ const emit = defineEmits<{
     submit: [message: string];
 }>();
 
-const textarea = ref<HTMLTextAreaElement | null>(null);
-
-function resizeTextarea(): void {
-    const element = textarea.value;
-
-    if (!element) {
-        return;
-    }
-
-    element.style.height = 'auto';
-    element.style.height = `${Math.min(element.scrollHeight, 192)}px`;
-    element.style.overflowY = element.scrollHeight > 192 ? 'auto' : 'hidden';
-}
-
-watch(
-    () => props.modelValue,
-    async () => {
-        await nextTick();
-        resizeTextarea();
-    },
-    { immediate: true },
-);
-
 function submitMessage(): void {
     const content = props.modelValue.trim();
 
@@ -60,23 +37,31 @@ function submitMessage(): void {
         :class="props.centered ? 'max-w-2xl' : 'max-w-3xl'"
         @submit.prevent="submitMessage"
     >
-        <div class="flex items-end gap-2">
-            <textarea
-                ref="textarea"
+        <div
+            class="flex flex-col rounded-xl border border-input bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30"
+        >
+            <Textarea
                 id="message"
-                :value="props.modelValue"
-                class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input min-h-9 max-h-48 w-full min-w-0 flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive md:text-sm"
+                :model-value="props.modelValue"
+                class="min-h-14 max-h-48 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+                auto-resize
+                :max-height="192"
                 required
                 maxlength="10000"
                 autocomplete="off"
                 :placeholder="props.placeholder"
                 aria-label="Message"
                 rows="1"
-                @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value); resizeTextarea()"
+                @update:model-value="emit('update:modelValue', String($event))"
                 @keydown.ctrl.enter.prevent="submitMessage"
                 @keydown.meta.enter.prevent="submitMessage"
             />
-            <Button type="submit" :disabled="props.processing || !props.modelValue.trim()">
+            <Button
+                type="submit"
+                size="sm"
+                class="self-end mx-2 mb-2"
+                :disabled="props.processing || !props.modelValue.trim()"
+            >
                 {{ props.processing ? 'Generating...' : props.submitLabel }}
             </Button>
         </div>

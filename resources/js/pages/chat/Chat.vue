@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, setLayoutProps } from '@inertiajs/vue3';
 import { onMounted, ref } from 'vue';
 import ChatForm from '@/components/ChatForm.vue';
 import ChatMessageContent from '@/components/ChatMessageContent.vue';
@@ -26,6 +26,19 @@ const threadTitle = ref(props.thread.title);
 const message = ref('');
 const processing = ref(false);
 const error = ref('');
+
+function updateThreadBreadcrumb(title: string): void {
+    setLayoutProps({
+        breadcrumbs: [
+            {
+                title,
+                href: dashboard(),
+            },
+        ],
+    });
+}
+
+updateThreadBreadcrumb(threadTitle.value);
 
 function xsrfToken(): string {
     const cookie = document.cookie
@@ -112,6 +125,7 @@ async function sendMessage(content?: string, existingMessageId?: number): Promis
 
                     if (typeof payload.title === 'string') {
                         threadTitle.value = payload.title;
+                        updateThreadBreadcrumb(payload.title);
                         router.reload({ only: ['threads'] });
                     }
                 }
@@ -190,49 +204,41 @@ onMounted(() => {
     }
 });
 
-defineOptions({
-    layout: {
-        breadcrumbs: [
-            {
-                title: 'Chat',
-                href: dashboard(),
-            },
-        ],
-    },
-});
 </script>
 
 <template>
     <Head :title="threadTitle" />
 
-    <main class="flex h-full min-h-0 flex-1 flex-col gap-4 p-4">
+    <main class="flex h-full min-h-0 flex-1 flex-col gap-4 p-4 border">
         <section
-            class="flex h-[70h] flex-1 flex-col gap-4 overflow-y-auto p-2"
+            class="overflow-y-auto p-2"
             role="log"
             aria-live="polite"
             aria-label="Conversation"
         >
-            <article
-                v-for="(item, index) in messages"
-                :key="item.id ?? `local-${index}`"
-                class="min-w-0 max-w-3xl rounded-xl p-4"
-                :class="item.role === 'user'
-                    ? 'ml-auto bg-primary text-primary-foreground'
-                    : 'mr-auto w-full'"
-            >
-                <p class="mb-1 text-xs font-semibold uppercase opacity-70">
-                    {{ item.role === 'user' ? 'You' : 'Lexi' }}
-                </p>
-                <p v-if="item.role === 'user'" class="whitespace-pre-wrap leading-7">
-                    {{ item.content }}
-                </p>
-                <ChatMessageContent v-else :content="item.content" />
-                <span
-                    v-if="item.role === 'assistant' && processing && index === messages.length - 1"
-                    class="animate-pulse"
-                    aria-label="Generating"
-                >▍</span>
-            </article>
+            <div class="h-[75vh] max-w-4xl mx-auto flex flex-1 flex-col gap-4">
+                <article
+                    v-for="(item, index) in messages"
+                    :key="item.id ?? `local-${index}`"
+                    class="min-w-0 max-w-6xl rounded-xl p-4"
+                    :class="item.role === 'user'
+                        ? 'ml-auto bg-primary text-primary-foreground'
+                        : 'mr-auto w-full'"
+                >
+                    <p class="mb-1 text-xs font-semibold uppercase opacity-70">
+                        {{ item.role === 'user' ? 'You' : 'Lexi' }}
+                    </p>
+                    <p v-if="item.role === 'user'" class="whitespace-pre-wrap leading-7">
+                        {{ item.content }}
+                    </p>
+                    <ChatMessageContent v-else :content="item.content" />
+                    <span
+                        v-if="item.role === 'assistant' && processing && index === messages.length - 1"
+                        class="animate-pulse"
+                        aria-label="Generating"
+                    >▍</span>
+                </article>
+            </div>
         </section>
 
         <ChatForm
