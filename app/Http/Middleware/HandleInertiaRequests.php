@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Thread;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -41,6 +42,17 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
             ],
+            'threads' => fn (): array => $request->user()
+                ?->threads()
+                ->withMax('messages', 'created_at')
+                ->orderByRaw('COALESCE(messages_max_created_at, threads.created_at) DESC')
+                ->orderByDesc('threads.id')
+                ->get(['threads.id', 'threads.title'])
+                ->map(fn (Thread $thread): array => [
+                    'id' => $thread->id,
+                    'title' => $thread->title,
+                ])
+                ->all() ?? [],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

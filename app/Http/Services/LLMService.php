@@ -4,6 +4,7 @@ namespace App\Http\Services;
 
 use Generator;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class LLMService
@@ -12,8 +13,11 @@ class LLMService
      * @param  array<int, array{role: string, content: string}>  $messages
      * @return Generator<int, string>
      */
-    public function stream(array $messages): Generator
-    {
+    public function stream(
+        array $messages,
+        ?string $systemPrompt = null,
+        int $maxTokens = 16384,
+    ): Generator {
         $url = config('services.llm.url');
         $key = config('services.llm.key');
         $model = config('services.llm.model');
@@ -27,11 +31,11 @@ class LLMService
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Your name is Lexi, you are a helpful assistant. You are a Legislative AI model that can answer questions about legislation, legal documents, and related topics. You are knowledgeable about laws, regulations, and legal procedures. You can provide explanations, summaries, and insights on legal matters. You are also capable of generating legal documents and assisting with legal research. Your responses should be accurate, concise, and informative.',
+                    'content' => $systemPrompt ?? 'Your name is Lexi, you are a helpful assistant. You are a Legislative AI model that can answer questions about legislation, legal documents, and related topics. You are knowledgeable about laws, regulations, and legal procedures. You can provide explanations, summaries, and insights on legal matters. You are also capable of generating legal documents and assisting with legal research. Your responses should be accurate, concise, and informative.',
                 ],
                 ...$messages,
             ],
-            'max_tokens' => 16384,
+            'max_tokens' => $maxTokens,
             'parallel_tool_calls' => true,
             'stream' => true,
         ];
@@ -94,6 +98,27 @@ class LLMService
         if ($content !== null && $content !== '') {
             yield $content;
         }
+    }
+
+    public function suggestTitle(string $message): string
+    {
+        $title = '';
+
+        foreach ($this->stream(
+            [['role' => 'user', 'content' => $message]],
+            'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.',
+            40,
+        ) as $content) {
+            $title .= $content;
+        }
+
+        $title = preg_replace('/\s+/u', ' ', trim($title, " \t\n\r\0\x0B\"'"));
+
+        if (! is_string($title) || $title === '') {
+            throw new RuntimeException('The LLM provider returned an empty chat title.');
+        }
+
+        return Str::limit($title, 255, '');
     }
 
     /**

@@ -8,7 +8,9 @@ Route::inertia('/', 'Welcome')->name('home');
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('new-chat', 'NewChat')->name('dashboard');
 
-    Route::post('/thread/store', [ThreadController::class, 'store'])->name('thread.store');
+    Route::post('/threads', [ThreadController::class, 'store'])->name('threads.store');
+    Route::get('/threads/{thread}', [ThreadController::class, 'show'])->name('threads.show');
+    Route::post('/threads/{thread}/messages', [ThreadController::class, 'storeMessage'])->name('threads.messages.store');
 
 });
 
