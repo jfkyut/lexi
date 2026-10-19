@@ -209,7 +209,7 @@ onMounted(() => {
 <template>
     <Head :title="threadTitle" />
 
-    <main class="flex h-full min-h-0 flex-1 flex-col gap-4 p-4 border">
+    <main class="flex h-full min-h-0 flex-1 flex-col gap-4 p-4">
         <section
             class="overflow-y-auto p-2"
             role="log"
