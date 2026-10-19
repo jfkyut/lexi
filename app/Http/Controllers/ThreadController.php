@@ -4,7 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Http\Services\LLMService;
 use App\Models\Thread;
-use Illuminate\Http\Client\Request;
+use Generator;
+use Illuminate\Http\Request;
+use Illuminate\Http\StreamedEvent;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 class ThreadController extends Controller
 {
@@ -23,14 +27,32 @@ class ThreadController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(Request $request): StreamedResponse
     {
-        $this->llmService->generate([
-            'role' => 'user',
-            'content' => $request->input('message'),
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'max:10000'],
         ]);
 
-        return back();
+        return response()->eventStream(function () use ($validated): Generator {
+            try {
+                foreach ($this->llmService->stream([
+                    [
+                        'role' => 'user',
+                        'content' => $validated['message'],
+                    ],
+                ]) as $content) {
+                    yield ['content' => $content];
+                }
+            } catch (Throwable $exception) {
+                report($exception);
+
+                yield new StreamedEvent('error', [
+                    'message' => 'The assistant could not complete this response.',
+                ]);
+            }
+        }, [
+            'X-Accel-Buffering' => 'no',
+        ], new StreamedEvent('done', []));
     }
 
     /**
