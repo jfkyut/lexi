@@ -32,7 +32,7 @@ class LegislationContextService
         'classification',
         'year',
         'reference_no',
-        'date_adopted',
+        // 'date_adopted',
         'date_approved',
         'proposal_reference_no',
         'proposal_title',
@@ -99,6 +99,7 @@ class LegislationContextService
 
         $query = DB::connection('legacy')
             ->table('documents')
+            ->leftJoin('document_statuses as legislation_statuses', 'legislation_statuses.id', '=', 'documents.status_id')
             ->leftJoin('councils', 'councils.id', '=', 'documents.council_id')
             ->select(array_map(
                 fn (string $column): string => 'documents.'.$column,
@@ -160,6 +161,10 @@ class LegislationContextService
         }
 
         $records = $query
+            ->orderByRaw("CASE WHEN legislation_statuses.name = 'approved' THEN documents.year ELSE documents.proposal_month END DESC")
+            ->orderByRaw("CASE WHEN legislation_statuses.name = 'approved' THEN CAST(documents.sequence_no AS UNSIGNED) ELSE CAST(documents.proposal_sequence_no AS UNSIGNED) END DESC")
+            ->orderByDesc('documents.reference_no')
+            ->orderByDesc('documents.proposal_reference_no')
             ->orderByRaw('('.implode(' + ', $scoreExpressions).') DESC', $scoreBindings)
             ->orderBy('documents.id')
             ->limit(self::MAX_RESULTS)

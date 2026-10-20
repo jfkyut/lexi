@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router, setLayoutProps } from '@inertiajs/vue3';
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import ChatForm from '@/components/ChatForm.vue';
 import ChatMessageContent from '@/components/ChatMessageContent.vue';
 import { storeMessage } from '@/actions/App/Http/Controllers/ThreadController';
@@ -26,6 +26,19 @@ const threadTitle = ref(props.thread.title);
 const message = ref('');
 const processing = ref(false);
 const error = ref('');
+const conversation = ref<HTMLElement | null>(null);
+
+function scrollToBottom(): void {
+    if (conversation.value) {
+        conversation.value.scrollTop = conversation.value.scrollHeight;
+    }
+}
+
+watch(
+    () => messages.value.map((item) => item.content),
+    scrollToBottom,
+    { flush: 'post' },
+);
 
 function updateThreadBreadcrumb(title: string): void {
     setLayoutProps({
@@ -199,6 +212,8 @@ function submitMessage(content: string): void {
 }
 
 onMounted(() => {
+    scrollToBottom();
+
     if (props.pendingMessageId !== null) {
         void sendMessage(undefined, props.pendingMessageId);
     }
@@ -211,12 +226,13 @@ onMounted(() => {
 
     <main class="flex h-full min-h-0 flex-1 flex-col gap-4 p-4">
         <section
+            ref="conversation"
             class="overflow-y-auto p-2"
             role="log"
             aria-live="polite"
             aria-label="Conversation"
         >
-            <div class="h-[75vh] max-w-4xl mx-auto flex flex-1 flex-col gap-4">
+            <div class="h-[75vh] border max-w-4xl mx-auto flex flex-1 flex-col gap-4">
                 <article
                     v-for="(item, index) in messages"
                     :key="item.id ?? `local-${index}`"
