@@ -71,6 +71,7 @@ const footerNavItems: NavItem[] = [
                             as-child
                             :is-active="isCurrentUrl(show.url(thread.id))"
                             :tooltip="thread.title"
+                            tooltip-when-expanded
                         >
                             <Link :href="show.url(thread.id)">
                                 <MessageCircle />
