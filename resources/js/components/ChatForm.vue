@@ -29,6 +29,15 @@ function submitMessage(): void {
         emit('submit', content);
     }
 }
+
+function handleEnter(event: KeyboardEvent): void {
+    if (event.shiftKey) {
+        return;
+    }
+
+    event.preventDefault();
+    submitMessage();
+}
 </script>
 
 <template>
@@ -53,8 +62,7 @@ function submitMessage(): void {
                 aria-label="Message"
                 rows="1"
                 @update:model-value="emit('update:modelValue', String($event))"
-                @keydown.ctrl.enter.prevent="submitMessage"
-                @keydown.meta.enter.prevent="submitMessage"
+                @keydown.enter="handleEnter"
             />
             <Button
                 type="submit"
