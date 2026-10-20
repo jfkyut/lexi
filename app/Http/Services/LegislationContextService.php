@@ -77,11 +77,11 @@ class LegislationContextService
 
     private const MAX_SEARCH_TERMS = 8;
 
-    private const MAX_RESULTS = 5;
+    private const MAX_RESULTS = 20;
 
-    private const MAX_RELATED_NAMES = 5;
+    private const MAX_RELATED_NAMES = 20;
 
-    private const MAX_CONTEXT_CHARACTERS = 24000;
+    private const MAX_CONTEXT_CHARACTERS = 50000;
 
     public function contextForQuestion(string $question): string
     {
