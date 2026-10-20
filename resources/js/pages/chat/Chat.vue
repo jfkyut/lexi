@@ -232,7 +232,7 @@ onMounted(() => {
             aria-live="polite"
             aria-label="Conversation"
         >
-            <div class="h-[75vh] border max-w-4xl mx-auto flex flex-1 flex-col gap-4">
+            <div class="h-[75vh] max-w-4xl mx-auto flex flex-1 flex-col gap-4">
                 <article
                     v-for="(item, index) in messages"
                     :key="item.id ?? `local-${index}`"
