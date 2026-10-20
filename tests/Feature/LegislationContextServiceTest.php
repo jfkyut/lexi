@@ -55,6 +55,11 @@ beforeEach(function () {
         $table->string('name');
     });
 
+    Schema::connection('legacy')->create('document_types', function (Blueprint $table): void {
+        $table->id();
+        $table->string('name');
+    });
+
     Schema::connection('legacy')->create('authors', function (Blueprint $table): void {
         $table->string('id')->primary();
         $table->string('first_name')->nullable();
@@ -111,7 +116,39 @@ test('legislation context includes matching reference numbers and titles', funct
         ->toContain('BILL-42')
         ->toContain('ORD-2024-18')
         ->toContain('Riverside water protection ordinance')
+        ->toContain('"final_legislation_number": "ORD-2024-18"')
+        ->toContain('"proposal_number": "BILL-42"')
+        ->toContain('These are different identifiers: never treat them as interchangeable.')
         ->toContain('metadata, not the full text');
+});
+
+test('legislation context finds records by document type and includes the type name', function () {
+    DB::connection('legacy')->table('document_types')->insert([
+        ['id' => 3, 'name' => 'appropriation_ordinance'],
+        ['id' => 4, 'name' => 'tax_ordinance'],
+    ]);
+
+    DB::connection('legacy')->table('documents')->insert([
+        [
+            'id' => 1,
+            'title' => 'Annual budget adjustments',
+            'type_id' => 3,
+            'reference_no' => 'APP-2024-1',
+        ],
+        [
+            'id' => 2,
+            'title' => 'Annual budget adjustments',
+            'type_id' => 4,
+            'reference_no' => 'TAX-2024-1',
+        ],
+    ]);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('tax');
+
+    expect($context)
+        ->toContain('TAX-2024-1')
+        ->toContain('"document_type": "tax_ordinance"')
+        ->not->toContain('APP-2024-1');
 });
 
 test('legislation context orders approved matches by year and numeric sequence before references', function () {
@@ -299,11 +336,17 @@ test('matching legislation is added to the system context sent to the llm', func
         ),
     ]);
 
+    DB::connection('legacy')->table('document_types')->insert([
+        'id' => 4,
+        'name' => 'tax_ordinance',
+    ]);
+
     DB::connection('legacy')->table('documents')->insert([
         'reference_no' => 'ORD-2024-18',
         'proposal_reference_no' => 'BILL-42',
         'title' => 'Riverside water protection ordinance',
         'proposal_title' => 'Riverside water protection',
+        'type_id' => 4,
     ]);
 
     $user = User::factory()->create();
@@ -319,5 +362,9 @@ test('matching legislation is added to the system context sent to the llm', func
     Http::assertSent(fn (ClientRequest $request): bool => $request->data()['messages'][0]['role'] === 'system'
         && str_contains($request->data()['messages'][0]['content'], 'BILL-42')
         && str_contains($request->data()['messages'][0]['content'], 'Riverside water protection')
+        && str_contains($request->data()['messages'][0]['content'], 'These are different identifiers: never treat them as interchangeable.')
+        && str_contains($request->data()['messages'][0]['content'], '"final_legislation_number": "ORD-2024-18"')
+        && str_contains($request->data()['messages'][0]['content'], '"proposal_number": "BILL-42"')
+        && str_contains($request->data()['messages'][0]['content'], '"document_type": "tax_ordinance"')
         && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Tell me about BILL-42']);
 });
