@@ -17,6 +17,7 @@ class LLMService
         array $messages,
         ?string $systemPrompt = null,
         int $maxTokens = 16384,
+        ?string $context = null,
     ): Generator {
         $url = config('services.llm.url');
         $key = config('services.llm.key');
@@ -26,12 +27,18 @@ class LLMService
             throw new RuntimeException('The LLM service is not configured.');
         }
 
+        $systemContent = $systemPrompt ?? 'Your name is Lexi, you are a helpful assistant. You are a Legislative AI model that can answer questions about legislation, legal documents, and related topics. You are knowledgeable about laws, regulations, and legal procedures. You can provide explanations, summaries, and insights on legal matters. You are also capable of generating legal documents and assisting with legal research. Your responses should be accurate, concise, and informative.';
+
+        if ($context !== null) {
+            $systemContent .= "\n\n".$context;
+        }
+
         $payload = [
             'model' => $model,
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => $systemPrompt ?? 'Your name is Lexi, you are a helpful assistant. You are a Legislative AI model that can answer questions about legislation, legal documents, and related topics. You are knowledgeable about laws, regulations, and legal procedures. You can provide explanations, summaries, and insights on legal matters. You are also capable of generating legal documents and assisting with legal research. Your responses should be accurate, concise, and informative.',
+                    'content' => $systemContent,
                 ],
                 ...$messages,
             ],

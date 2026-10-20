@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Services\LegislationContextService;
 use App\Http\Services\LLMService;
 use App\Models\Message;
 use App\Models\Thread;
@@ -20,6 +21,7 @@ class ThreadController extends Controller
 {
     public function __construct(
         protected LLMService $llmService,
+        protected LegislationContextService $legislationContextService,
     ) {}
 
     /**
@@ -169,7 +171,10 @@ class ThreadController extends Controller
                 yield ['content' => $existingContent];
             } else {
                 try {
-                    foreach ($this->llmService->stream($history) as $content) {
+                    $question = $history[array_key_last($history)]['content'];
+                    $context = $this->legislationContextService->contextForQuestion($question);
+
+                    foreach ($this->llmService->stream($history, context: $context) as $content) {
                         $responseContent .= $content;
                         yield ['content' => $content];
                     }
