@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Button from '@/components/ui/button/Button.vue';
 import { Textarea } from '@/components/ui/textarea';
+import { Loader2Icon, Send } from '@lucide/vue';
 
 const props = withDefaults(defineProps<{
     modelValue: string;
@@ -66,11 +67,14 @@ function handleEnter(event: KeyboardEvent): void {
             />
             <Button
                 type="submit"
-                size="sm"
-                class="self-end mx-2 mb-2"
+                size="icon-sm"
+                class="self-end mx-2 mb-2 hover:cursor-pointer"
                 :disabled="props.processing || !props.modelValue.trim()"
+                :aria-label="props.processing ? 'Generating...' : props.submitLabel"
+                :title="props.processing ? 'Generating...' : props.submitLabel"
             >
-                {{ props.processing ? 'Generating...' : props.submitLabel }}
+                <Loader2Icon v-if="props.processing" class="size-4 animate-spin" aria-hidden="true" />
+                <Send v-else class="size-4" aria-hidden="true" />
             </Button>
         </div>
         <p v-if="props.error" class="text-sm text-destructive" role="alert">
