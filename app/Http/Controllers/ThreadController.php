@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Services\AttachmentPromptService;
+use App\Http\Services\GeneratedFileService;
 use App\Http\Services\LegislationContextService;
 use App\Http\Services\LLMService;
+use App\Http\Services\LLMToolCall;
 use App\Models\Attachment;
 use App\Models\Message;
 use App\Models\Thread;
@@ -36,6 +38,7 @@ class ThreadController extends Controller
         protected LLMService $llmService,
         protected LegislationContextService $legislationContextService,
         protected AttachmentPromptService $attachmentPromptService,
+        protected GeneratedFileService $generatedFileService,
     ) {}
 
     /**
@@ -237,9 +240,50 @@ class ThreadController extends Controller
                     ]);
 
                     $context = $this->legislationContextService->contextForQuestion((string) ($userMessage->content ?? ''));
-                    foreach ($this->llmService->stream($history, context: $context) as $content) {
-                        $responseContent .= $content;
-                        yield ['content' => $content];
+                    $toolCalls = [];
+
+                    foreach ($this->llmService->stream($history, context: $context, allowFileGeneration: true) as $streamEvent) {
+                        if ($streamEvent instanceof LLMToolCall) {
+                            $toolCalls[] = $streamEvent;
+
+                            continue;
+                        }
+
+                        $responseContent .= $streamEvent;
+                        yield ['content' => $streamEvent];
+                    }
+
+                    if (count($toolCalls) > 1) {
+                        throw new RuntimeException('The LLM requested too many file-generation operations.');
+                    }
+
+                    if (isset($toolCalls[0])) {
+                        $toolCall = $toolCalls[0];
+                        $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
+                        $generatedPaths[] = $generatedAttachment->path;
+
+                        $history[] = [
+                            'role' => 'assistant',
+                            'content' => null,
+                            'tool_calls' => [$toolCall->requestData()],
+                        ];
+                        $history[] = [
+                            'role' => 'tool',
+                            'tool_call_id' => $toolCall->id,
+                            'content' => json_encode([
+                                'success' => true,
+                                'filename' => $generatedAttachment->filename,
+                            ], JSON_THROW_ON_ERROR),
+                        ];
+
+                        foreach ($this->llmService->stream($history, context: $context) as $streamEvent) {
+                            if (! is_string($streamEvent)) {
+                                throw new RuntimeException('The LLM requested another file-generation operation.');
+                            }
+
+                            $responseContent .= $streamEvent;
+                            yield ['content' => $streamEvent];
+                        }
                     }
 
                     $assistantMessage->update(['content' => $responseContent]);
@@ -367,7 +411,7 @@ class ThreadController extends Controller
 
     /**
      * @param  Collection<int, Message>  $messages
-     * @return array<int, array{role: string, content: string|array<int, array<string, mixed>>}>
+     * @return array<int, array<string, mixed>>
      */
     private function llmHistory(Collection $messages): array
     {
@@ -413,6 +457,10 @@ class ThreadController extends Controller
             $filename = $match[1];
 
             if (pathinfo($filename, PATHINFO_EXTENSION) === '') {
+                continue;
+            }
+
+            if (in_array(strtolower(pathinfo($filename, PATHINFO_EXTENSION)), ['pdf', 'docx', 'xlsx'], true)) {
                 continue;
             }
 
