@@ -45,11 +45,9 @@ function submitMessage(): void {
     }
 }
 
-function selectFiles(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = [...props.files, ...Array.from(input.files ?? [])];
+function addFiles(newFiles: File[]): void {
+    const files = [...props.files, ...newFiles];
 
-    input.value = '';
     fileError.value = '';
 
     if (files.length > MAX_ATTACHMENTS) {
@@ -71,6 +69,39 @@ function selectFiles(event: Event): void {
     }
 
     emit('update:files', files);
+}
+
+function selectFiles(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const selectedFiles = Array.from(input.files ?? []);
+
+    input.value = '';
+
+    addFiles(selectedFiles);
+}
+
+function pasteFiles(event: ClipboardEvent): void {
+    const imageFiles = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null)
+        .map((file, index) => {
+            if (file.name) {
+                return file;
+            }
+
+            const extension = file.type.split('/')[1]?.split('+')[0] || 'png';
+            const filename = `pasted-image-${Date.now()}-${index + 1}.${extension}`;
+
+            return new File([file], filename, {
+                type: file.type,
+                lastModified: file.lastModified,
+            });
+        });
+
+    if (imageFiles.length > 0) {
+        addFiles(imageFiles);
+    }
 }
 
 function removeFile(index: number): void {
@@ -133,6 +164,7 @@ function handleEnter(event: KeyboardEvent): void {
                 :placeholder="props.placeholder"
                 aria-label="Message"
                 rows="1"
+                @paste="pasteFiles"
                 @update:model-value="emit('update:modelValue', String($event))"
                 @keydown.enter="handleEnter"
             />
@@ -162,7 +194,8 @@ function handleEnter(event: KeyboardEvent): void {
                         <Paperclip class="size-4" aria-hidden="true" />
                     </Button>
                     <p class="text-xs text-muted-foreground">
-                        Images, PDF, DOCX, TXT · Up to 20 files, 1 GB total
+                        Paste screenshots or attach images, PDF, DOCX, TXT · Up
+                        to 20 files, 1 GB total
                     </p>
                 </div>
                 <Button
