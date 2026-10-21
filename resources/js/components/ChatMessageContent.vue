@@ -119,7 +119,7 @@ const blocks = computed<MessageBlock[]>(() => {
 
     for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index];
-        const fence = line.match(/^\s*(```+|~~~+)\s*([\w+-]*)\s*$/);
+        const fence = line.match(/^\s*(```+|~~~+)\s*([\w.+-]*)\s*$/);
 
         if (fence) {
             flushText();

@@ -7,13 +7,25 @@ import { useForm } from '@inertiajs/vue3';
 
 const form = useForm({
     message: '',
+    attachments: [] as File[],
 });
 
-function createThread(message: string): void {
+function createThread(message: string, attachments: File[]): void {
     form.message = message;
+    form.attachments = attachments;
     form.post(store.url(), {
         preserveScroll: true,
+        forceFormData: true,
     });
+}
+
+function attachmentError(): string | undefined {
+    return (
+        form.errors.attachments ??
+        Object.entries(form.errors).find(([field]) =>
+            field.startsWith('attachments.'),
+        )?.[1]
+    );
 }
 
 defineOptions({
@@ -31,21 +43,27 @@ defineOptions({
 <template>
     <Head title="New chat" />
 
-    <main class="flex h-full min-h-[60vh] flex-1 flex-col items-center justify-center gap-5 p-4">
+    <main
+        class="flex h-full min-h-[60vh] flex-1 flex-col items-center justify-center gap-5 p-4"
+    >
         <div class="w-full max-w-2xl space-y-2 text-center">
-            <h1 class="text-3xl font-semibold tracking-tight">Start a new chat</h1>
+            <h1 class="text-3xl font-semibold tracking-tight">
+                Start a new chat
+            </h1>
             <p class="text-muted-foreground">
-                Ask Lexi a question to create a thread and begin your conversation.
+                Ask Lexi a question or attach a photo or document to analyze.
             </p>
         </div>
 
         <ChatForm
             :model-value="form.message"
             :processing="form.processing"
-            :error="form.errors.message"
+            :files="form.attachments"
+            :error="form.errors.message || attachmentError()"
             submit-label="Start chat"
             centered
             @update:model-value="form.message = $event"
+            @update:files="form.attachments = $event"
             @submit="createThread"
         />
     </main>

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Attachment extends Model
 {
@@ -15,7 +16,10 @@ class Attachment extends Model
         'position',
     ];
 
-    public function message()
+    /**
+     * @return BelongsTo<Message, $this>
+     */
+    public function message(): BelongsTo
     {
         return $this->belongsTo(Message::class);
     }

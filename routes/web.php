@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\ThreadController;
 use Illuminate\Support\Facades\Route;
 
@@ -11,7 +12,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/threads', [ThreadController::class, 'store'])->name('threads.store');
     Route::get('/threads/{thread}', [ThreadController::class, 'show'])->name('threads.show');
     Route::post('/threads/{thread}/messages', [ThreadController::class, 'storeMessage'])->name('threads.messages.store');
-
+    Route::get('/attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
 });
 
 require __DIR__.'/settings.php';
