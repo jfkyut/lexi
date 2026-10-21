@@ -82,20 +82,15 @@ control.
 
 ## Run locally
 
-Start the Laravel application:
+Start the development environment:
 
 ```sh
-php artisan serve
+composer run dev
 ```
 
-In a separate terminal, start the frontend development server:
-
-```sh
-npm run dev
-```
-
-Open the URL printed by `php artisan serve` (by default,
-`http://localhost:8000`).
+This runs the project's Laravel development command, including the application
+and frontend development processes. Open the local URL shown in the command
+output.
 
 ## Development checks
 
