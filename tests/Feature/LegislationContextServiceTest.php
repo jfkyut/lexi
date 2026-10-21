@@ -116,10 +116,44 @@ test('legislation context includes matching reference numbers and titles', funct
         ->toContain('BILL-42')
         ->toContain('ORD-2024-18')
         ->toContain('Riverside water protection ordinance')
+        ->toContain('"reference_no": "ORD-2024-18"')
+        ->toContain('"proposal_reference_no": "BILL-42"')
         ->toContain('"final_legislation_number": "ORD-2024-18"')
         ->toContain('"proposal_number": "BILL-42"')
+        ->toContain('always show both and label them exactly as reference_no (final legislation number) and proposal_reference_no (proposal number)')
         ->toContain('These are different identifiers: never treat them as interchangeable.')
         ->toContain('metadata, not the full text');
+});
+
+test('legislation context selects approved records for ordinance requests', function () {
+    DB::connection('legacy')->table('document_statuses')->insert([
+        ['id' => 1, 'name' => 'proposal'],
+        ['id' => 3, 'name' => 'approved'],
+    ]);
+
+    DB::connection('legacy')->table('documents')->insert([
+        [
+            'id' => 1,
+            'title' => 'Tax ordinance for water quality',
+            'status_id' => 1,
+            'reference_no' => null,
+            'proposal_reference_no' => 'BILL-2025-4',
+        ],
+        [
+            'id' => 2,
+            'title' => 'Tax ordinance for water quality',
+            'status_id' => 3,
+            'reference_no' => 'TAX-2025-4',
+            'proposal_reference_no' => 'BILL-2025-4',
+        ],
+    ]);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('Show the tax ordinance for water quality');
+
+    expect($context)
+        ->toContain('"id": 2')
+        ->toContain('"legislation_status": "approved"')
+        ->not->toContain('"id": 1');
 });
 
 test('legislation context finds records by document type and includes the type name', function () {
@@ -166,6 +200,7 @@ test('legislation context orders approved matches by year and numeric sequence b
             'sequence_no' => '9',
             'reference_no' => 'ORD-2024-9',
             'proposal_reference_no' => 'BILL-2024-9',
+            'created_at' => null,
         ],
         [
             'id' => 2,
@@ -175,6 +210,7 @@ test('legislation context orders approved matches by year and numeric sequence b
             'sequence_no' => '2',
             'reference_no' => 'ORD-2025-2',
             'proposal_reference_no' => 'BILL-2025-2',
+            'created_at' => null,
         ],
         [
             'id' => 3,
@@ -184,6 +220,7 @@ test('legislation context orders approved matches by year and numeric sequence b
             'sequence_no' => '10',
             'reference_no' => 'ORD-2025-10',
             'proposal_reference_no' => 'BILL-A',
+            'created_at' => null,
         ],
         [
             'id' => 4,
@@ -193,6 +230,7 @@ test('legislation context orders approved matches by year and numeric sequence b
             'sequence_no' => '10',
             'reference_no' => 'ORD-2025-11',
             'proposal_reference_no' => 'BILL-A',
+            'created_at' => null,
         ],
         [
             'id' => 5,
@@ -202,18 +240,30 @@ test('legislation context orders approved matches by year and numeric sequence b
             'sequence_no' => '10',
             'reference_no' => 'ORD-2025-11',
             'proposal_reference_no' => 'BILL-Z',
+            'created_at' => '2025-12-30 00:00:00',
+        ],
+        [
+            'id' => 6,
+            'title' => 'Water ordinance',
+            'status_id' => 3,
+            'year' => '2025',
+            'sequence_no' => '10',
+            'reference_no' => 'ORD-2025-11',
+            'proposal_reference_no' => 'BILL-Z',
+            'created_at' => '2025-12-31 00:00:00',
         ],
     ]);
 
-    $context = app(LegislationContextService::class)->contextForQuestion('water');
+    $context = app(LegislationContextService::class)->contextForQuestion('latest water ordinance');
 
-    expect(strpos($context, '"id": 5'))->toBeLessThan(strpos($context, '"id": 4'))
+    expect(strpos($context, '"id": 6'))->toBeLessThan(strpos($context, '"id": 5'))
+        ->and(strpos($context, '"id": 5'))->toBeLessThan(strpos($context, '"id": 4'))
         ->and(strpos($context, '"id": 4'))->toBeLessThan(strpos($context, '"id": 3'))
         ->and(strpos($context, '"id": 3'))->toBeLessThan(strpos($context, '"id": 2'))
         ->and(strpos($context, '"id": 2'))->toBeLessThan(strpos($context, '"id": 1'));
 });
 
-test('legislation context orders proposed matches by proposal month and numeric sequence', function () {
+test('legislation context orders latest proposed matches by year and numeric sequence', function () {
     DB::connection('legacy')->table('document_statuses')->insert([
         ['id' => 3, 'name' => 'approved'],
         ['id' => 1, 'name' => 'proposal'],
@@ -225,6 +275,9 @@ test('legislation context orders proposed matches by proposal month and numeric 
             'title' => 'Water ordinance',
             'status_id' => 1,
             'proposal_month' => '2025-01',
+            'year' => '2024',
+            'sequence_no' => null,
+            'reference_no' => null,
             'proposal_sequence_no' => '9',
             'proposal_reference_no' => 'BILL-2025-01-9',
         ],
@@ -232,7 +285,10 @@ test('legislation context orders proposed matches by proposal month and numeric 
             'id' => 2,
             'title' => 'Water ordinance',
             'status_id' => 1,
-            'proposal_month' => '2025-02',
+            'proposal_month' => '2025-01',
+            'year' => '2025',
+            'sequence_no' => null,
+            'reference_no' => null,
             'proposal_sequence_no' => '2',
             'proposal_reference_no' => 'BILL-2025-02-2',
         ],
@@ -240,13 +296,31 @@ test('legislation context orders proposed matches by proposal month and numeric 
             'id' => 3,
             'title' => 'Water ordinance',
             'status_id' => 1,
-            'proposal_month' => '2025-02',
+            'proposal_month' => '2025-01',
+            'year' => '2025',
+            'sequence_no' => null,
+            'reference_no' => null,
             'proposal_sequence_no' => '10',
             'proposal_reference_no' => 'BILL-2025-02-10',
         ],
+        [
+            'id' => 4,
+            'title' => 'Water ordinance',
+            'status_id' => 3,
+            'year' => '2026',
+            'proposal_month' => null,
+            'sequence_no' => '20',
+            'proposal_sequence_no' => null,
+            'reference_no' => 'ORD-2026-20',
+            'proposal_reference_no' => null,
+        ],
     ]);
 
-    $context = app(LegislationContextService::class)->contextForQuestion('water');
+    $context = app(LegislationContextService::class)->contextForQuestion('latest proposed water ordinances not yet approved');
+
+    expect($context)
+        ->toContain('"legislation_status": "proposal"')
+        ->not->toContain('"id": 4');
 
     expect(strpos($context, '"id": 3'))->toBeLessThan(strpos($context, '"id": 2'))
         ->and(strpos($context, '"id": 2'))->toBeLessThan(strpos($context, '"id": 1'));
