@@ -34,6 +34,8 @@ class ThreadController extends Controller
 
     private const MAX_TOTAL_ATTACHMENT_BYTES = 1_073_741_824;
 
+    private const MAX_LLM_TOOL_CALLS = 3;
+
     public function __construct(
         protected LLMService $llmService,
         protected LegislationContextService $legislationContextService,
@@ -240,50 +242,71 @@ class ThreadController extends Controller
                     ]);
 
                     $context = $this->legislationContextService->contextForQuestion((string) ($userMessage->content ?? ''));
-                    $toolCalls = [];
+                    $toolCallCount = 0;
+                    $fileGenerated = false;
 
-                    foreach ($this->llmService->stream($history, context: $context, allowFileGeneration: true) as $streamEvent) {
-                        if ($streamEvent instanceof LLMToolCall) {
-                            $toolCalls[] = $streamEvent;
+                    while (true) {
+                        $toolCalls = [];
 
-                            continue;
+                        foreach ($this->llmService->stream(
+                            $history,
+                            context: $context,
+                            allowFileGeneration: ! $fileGenerated,
+                            allowLegislationSearch: true,
+                        ) as $streamEvent) {
+                            if ($streamEvent instanceof LLMToolCall) {
+                                $toolCalls[] = $streamEvent;
+
+                                continue;
+                            }
+
+                            $responseContent .= $streamEvent;
+                            yield ['content' => $streamEvent];
                         }
 
-                        $responseContent .= $streamEvent;
-                        yield ['content' => $streamEvent];
-                    }
+                        $context = null;
 
-                    if (count($toolCalls) > 1) {
-                        throw new RuntimeException('The LLM requested too many file-generation operations.');
-                    }
+                        if ($toolCalls === []) {
+                            break;
+                        }
 
-                    if (isset($toolCalls[0])) {
+                        if (count($toolCalls) > 1 || ++$toolCallCount > self::MAX_LLM_TOOL_CALLS) {
+                            throw new RuntimeException('The LLM requested too many tool operations.');
+                        }
+
                         $toolCall = $toolCalls[0];
-                        $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
-                        $generatedPaths[] = $generatedAttachment->path;
 
                         $history[] = [
                             'role' => 'assistant',
                             'content' => null,
                             'tool_calls' => [$toolCall->requestData()],
                         ];
+
+                        if ($toolCall->name === 'search_legislation') {
+                            $query = $toolCall->arguments['query'] ?? null;
+
+                            if (! is_string($query) || trim($query) === '' || mb_strlen($query) > 500) {
+                                throw new RuntimeException('The LLM returned an invalid legislation search query.');
+                            }
+
+                            $toolResult = $this->legislationContextService->contextForQuestion(trim($query));
+                        } elseif ($toolCall->name === 'generate_file' && ! $fileGenerated) {
+                            $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
+                            $generatedPaths[] = $generatedAttachment->path;
+                            $fileGenerated = true;
+                            $toolResult = json_encode([
+                                'success' => true,
+                                'filename' => $generatedAttachment->filename,
+                            ], JSON_THROW_ON_ERROR);
+                        } else {
+                            throw new RuntimeException('The LLM requested an unsupported or repeated tool operation.');
+                        }
+
                         $history[] = [
                             'role' => 'tool',
                             'tool_call_id' => $toolCall->id,
-                            'content' => json_encode([
-                                'success' => true,
-                                'filename' => $generatedAttachment->filename,
-                            ], JSON_THROW_ON_ERROR),
+                            'content' => $toolResult,
                         ];
-
-                        foreach ($this->llmService->stream($history, context: $context) as $streamEvent) {
-                            if (! is_string($streamEvent)) {
-                                throw new RuntimeException('The LLM requested another file-generation operation.');
-                            }
-
-                            $responseContent .= $streamEvent;
-                            yield ['content' => $streamEvent];
-                        }
                     }
 
                     $assistantMessage->update(['content' => $responseContent]);

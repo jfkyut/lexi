@@ -442,3 +442,79 @@ test('matching legislation is added to the system context sent to the llm', func
         && str_contains($request->data()['messages'][0]['content'], '"document_type": "tax_ordinance"')
         && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Tell me about BILL-42']);
 });
+
+test('the llm can search additional legislation records and use the results in its reply', function () {
+    Http::preventStrayRequests();
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+    ]);
+
+    Http::fake(function (ClientRequest $request) {
+        $messages = $request->data()['messages'];
+
+        if (end($messages)['role'] === 'tool') {
+            return Http::response(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"I found the Tricycle Franchise Regulation.\"}}]}\n\n".
+                "data: [DONE]\n\n",
+                200,
+                ['Content-Type' => 'text/event-stream'],
+            );
+        }
+
+        $arguments = json_encode(['query' => 'tricycle franchise'], JSON_THROW_ON_ERROR);
+
+        return Http::response(
+            'data: '.json_encode([
+                'choices' => [[
+                    'delta' => [
+                        'tool_calls' => [[
+                            'index' => 0,
+                            'id' => 'call_legislation_search',
+                            'type' => 'function',
+                            'function' => [
+                                'name' => 'search_legislation',
+                                'arguments' => $arguments,
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], JSON_THROW_ON_ERROR)."\n\n".
+            "data: [DONE]\n\n",
+            200,
+            ['Content-Type' => 'text/event-stream'],
+        );
+    });
+
+    DB::connection('legacy')->table('documents')->insert([
+        'reference_no' => 'ORD-2025-12',
+        'title' => 'Tricycle Franchise Regulation',
+        'remarks' => 'Sets local franchise requirements.',
+    ]);
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Franchise question']);
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => 'Can you find the tricycle franchise regulation?',
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())
+        ->toContain('I found the Tricycle Franchise Regulation.')
+        ->not->toContain('event: error');
+
+    Http::assertSent(fn (ClientRequest $request): bool => isset($request->data()['tools'][1]['function'])
+        && $request->data()['tools'][1]['function']['name'] === 'search_legislation'
+        && str_contains($request->data()['messages'][0]['content'], 'Never claim you cannot access or search the connected records'));
+
+    Http::assertSent(function (ClientRequest $request): bool {
+        $messages = $request->data()['messages'];
+        $toolMessage = end($messages);
+
+        return $toolMessage['role'] === 'tool'
+            && str_contains($toolMessage['content'], 'Tricycle Franchise Regulation')
+            && str_contains($toolMessage['content'], 'ORD-2025-12');
+    });
+});

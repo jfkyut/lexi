@@ -36,7 +36,7 @@ class LLMToolCall
         $arguments = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
 
         if (! is_array($arguments) || array_is_list($arguments)) {
-            throw new RuntimeException('The LLM returned invalid file-generation arguments.');
+            throw new RuntimeException('The LLM returned invalid tool arguments.');
         }
 
         return new self($id, $name, $argumentsJson, $arguments);
