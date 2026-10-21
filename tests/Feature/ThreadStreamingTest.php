@@ -215,6 +215,132 @@ test('users cannot view or send messages to another users thread', function () {
     $this->assertDatabaseCount('messages', 0);
 });
 
+test('users can rename their own chat', function () {
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Old title']);
+
+    $this->actingAs($user)
+        ->patch(route('threads.update', $thread), ['title' => 'New title'])
+        ->assertRedirect();
+
+    expect($thread->fresh()->title)->toBe('New title');
+});
+
+test('users can pin and unpin their own chats and pinned chats appear first', function () {
+    $user = User::factory()->create();
+    $recentChat = $user->threads()->create(['title' => 'Recent chat']);
+    $pinnedChat = $user->threads()->create(['title' => 'Pinned chat']);
+    $olderChat = $user->threads()->create(['title' => 'Older chat']);
+    $olderChat->forceFill(['created_at' => now()->subDay()])->save();
+
+    $this->actingAs($user)
+        ->from(route('dashboard'))
+        ->patch(route('threads.pin', $pinnedChat), ['is_pinned' => true])
+        ->assertRedirect(route('dashboard'));
+
+    $this->assertDatabaseHas('threads', [
+        'id' => $pinnedChat->id,
+        'is_pinned' => true,
+    ]);
+
+    $this->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('threads.0.id', $pinnedChat->id)
+            ->where('threads.0.is_pinned', true)
+            ->where('threads.1.id', $recentChat->id)
+            ->where('threads.2.id', $olderChat->id));
+
+    $this->from(route('dashboard'))
+        ->patch(route('threads.pin', $pinnedChat), ['is_pinned' => false])
+        ->assertRedirect(route('dashboard'));
+
+    $this->assertDatabaseHas('threads', [
+        'id' => $pinnedChat->id,
+        'is_pinned' => false,
+    ]);
+});
+
+test('pinning a chat requires a boolean value', function (mixed $isPinned) {
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'A chat']);
+
+    $this->actingAs($user)
+        ->from(route('threads.show', $thread))
+        ->patch(route('threads.pin', $thread), ['is_pinned' => $isPinned])
+        ->assertRedirect(route('threads.show', $thread))
+        ->assertSessionHasErrors('is_pinned');
+
+    expect($thread->fresh()->is_pinned)->toBeFalse();
+})->with([
+    'invalid text' => 'yes',
+    'missing value' => null,
+]);
+
+test('renaming a chat rejects empty or overlong titles', function (string $title) {
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Original title']);
+
+    $this->actingAs($user)
+        ->from(route('threads.show', $thread))
+        ->patch(route('threads.update', $thread), ['title' => $title])
+        ->assertRedirect(route('threads.show', $thread))
+        ->assertSessionHasErrors('title');
+
+    expect($thread->fresh()->title)->toBe('Original title');
+})->with([
+    'empty title' => '',
+    'title over 255 characters' => str_repeat('a', 256),
+]);
+
+test('users cannot rename or delete another users chat', function () {
+    $owner = User::factory()->create();
+    $thread = $owner->threads()->create(['title' => 'Private chat']);
+    $otherUser = User::factory()->create();
+
+    $this->actingAs($otherUser)
+        ->patch(route('threads.update', $thread), ['title' => 'Changed title'])
+        ->assertNotFound();
+
+    $this->patch(route('threads.pin', $thread), ['is_pinned' => true])
+        ->assertNotFound();
+
+    $this->delete(route('threads.destroy', $thread))
+        ->assertNotFound();
+
+    expect($thread->fresh()->title)->toBe('Private chat');
+    expect($thread->fresh()->is_pinned)->toBeFalse();
+    $this->assertModelExists($thread);
+});
+
+test('deleting a chat removes its messages attachments and stored files', function () {
+    Storage::fake('local');
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Chat to delete']);
+    $message = $thread->messages()->create([
+        'role' => 'user',
+        'content' => 'A message with an attachment',
+    ]);
+    $path = 'attachments/test-chat-delete.txt';
+    Storage::disk('local')->put($path, 'Attached text');
+    $message->attachments()->create([
+        'type' => 'document',
+        'filename' => 'notes.txt',
+        'size' => '13',
+        'path' => $path,
+    ]);
+
+    $this->actingAs($user)
+        ->delete(route('threads.destroy', $thread))
+        ->assertRedirect(route('dashboard'));
+
+    $this->assertDatabaseMissing('threads', ['id' => $thread->id]);
+    $this->assertDatabaseMissing('messages', ['id' => $message->id]);
+    $this->assertDatabaseMissing('attachments', ['message_id' => $message->id]);
+    Storage::disk('local')->assertMissing($path);
+});
+
 test('pending message identifiers are scoped to their thread', function () {
     $user = User::factory()->create();
     $sourceThread = $user->threads()->create(['title' => 'Source thread']);

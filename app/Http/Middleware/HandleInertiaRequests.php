@@ -45,12 +45,14 @@ class HandleInertiaRequests extends Middleware
             'threads' => fn (): array => $request->user()
                 ?->threads()
                 ->withMax('messages', 'created_at')
+                ->orderByDesc('threads.is_pinned')
                 ->orderByRaw('COALESCE(messages_max_created_at, threads.created_at) DESC')
                 ->orderByDesc('threads.id')
-                ->get(['threads.id', 'threads.title'])
+                ->get(['threads.id', 'threads.title', 'threads.is_pinned'])
                 ->map(fn (Thread $thread): array => [
                     'id' => $thread->id,
                     'title' => $thread->title,
+                    'is_pinned' => $thread->is_pinned,
                 ])
                 ->all() ?? [],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',

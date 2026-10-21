@@ -14,7 +14,15 @@ class Thread extends Model
     protected $fillable = [
         'title',
         'user_id',
+        'is_pinned',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_pinned' => 'boolean',
+        ];
+    }
 
     /**
      * @return HasMany<Message, $this>

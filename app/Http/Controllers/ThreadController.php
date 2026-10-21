@@ -145,6 +145,57 @@ class ThreadController extends Controller
         ]);
     }
 
+    public function update(Request $request, Thread $thread): RedirectResponse
+    {
+        $this->authorizeThread($request, $thread);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+        ]);
+
+        $thread->update([
+            'title' => trim($validated['title']),
+        ]);
+
+        return redirect()->back();
+    }
+
+    public function pin(Request $request, Thread $thread): RedirectResponse
+    {
+        $this->authorizeThread($request, $thread);
+
+        $validated = $request->validate([
+            'is_pinned' => ['required', 'boolean'],
+        ]);
+
+        $thread->update([
+            'is_pinned' => (bool) $validated['is_pinned'],
+        ]);
+
+        return redirect()->back();
+    }
+
+    public function destroy(Request $request, Thread $thread): RedirectResponse
+    {
+        $this->authorizeThread($request, $thread);
+
+        $attachmentPaths = $thread->messages()
+            ->with('attachments:id,message_id,path')
+            ->get(['id'])
+            ->flatMap(fn (Message $message): \Illuminate\Support\Collection => $message->attachments->pluck('path'))
+            ->all();
+
+        if (! $thread->delete()) {
+            throw new RuntimeException('The chat could not be deleted.');
+        }
+
+        if ($attachmentPaths !== [] && ! Storage::disk('local')->delete($attachmentPaths)) {
+            throw new RuntimeException('The chat attachments could not be deleted.');
+        }
+
+        return redirect()->route('dashboard');
+    }
+
     public function storeMessage(Request $request, Thread $thread): StreamedResponse
     {
         $this->authorizeThread($request, $thread);
@@ -516,21 +567,5 @@ class ThreadController extends Controller
             'filename' => $attachment->filename,
             'size' => (int) $attachment->size,
         ];
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, Thread $thread): void
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Thread $thread): void
-    {
-        //
     }
 }

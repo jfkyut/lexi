@@ -22,6 +22,7 @@ declare module '@inertiajs/core' {
             threads: Array<{
                 id: string;
                 title: string;
+                is_pinned: boolean;
             }>;
             sidebarOpen: boolean;
             [key: string]: unknown;
