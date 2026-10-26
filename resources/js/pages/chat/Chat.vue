@@ -6,6 +6,7 @@ import ChatMessageContent from '@/components/ChatMessageContent.vue';
 import { storeMessage } from '@/actions/App/Http/Controllers/ThreadController';
 import { show as showAttachment } from '@/actions/App/Http/Controllers/AttachmentController';
 import { dashboard } from '@/routes';
+import { Loader2Icon } from '@lucide/vue';
 
 type ChatAttachment = {
     id?: number;
@@ -37,6 +38,7 @@ const threadTitle = ref(props.thread.title);
 const message = ref('');
 const files = ref<File[]>([]);
 const processing = ref(false);
+const activity = ref('');
 const error = ref('');
 const conversation = ref<HTMLElement | null>(null);
 
@@ -120,6 +122,7 @@ async function sendMessage(
     }
 
     error.value = '';
+    activity.value = 'Preparing your response';
     processing.value = true;
 
     try {
@@ -196,6 +199,14 @@ async function sendMessage(
                         threadTitle.value = payload.title;
                         updateThreadBreadcrumb(payload.title);
                         router.reload({ only: ['threads'] });
+                    }
+                }
+
+                if (eventName === 'activity') {
+                    const payload = JSON.parse(data) as { message?: unknown };
+
+                    if (typeof payload.message === 'string') {
+                        activity.value = payload.message;
                     }
                 }
 
@@ -291,6 +302,7 @@ async function sendMessage(
                 : 'The assistant could not complete this response.';
     } finally {
         processing.value = false;
+        activity.value = '';
     }
 }
 
@@ -332,6 +344,32 @@ onMounted(() => {
                     <p class="mb-1 text-xs font-semibold uppercase opacity-70">
                         {{ item.role === 'user' ? 'You' : 'Lexi' }}
                     </p>
+                    <div
+                        v-if="
+                            item.role === 'assistant' &&
+                            processing &&
+                            index === messages.length - 1
+                        "
+                        class="mb-2 flex items-center gap-2 text-sm text-muted-foreground"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <Loader2Icon
+                            class="size-4 animate-spin"
+                            aria-hidden="true"
+                        />
+                        <span>{{ activity }}</span>
+                    </div>
+                    <span
+                        v-if="
+                            item.role === 'assistant' &&
+                            processing &&
+                            index === messages.length - 1
+                        "
+                        class="animate-pulse"
+                        aria-label="Generating"
+                        >▍</span
+                    >
                     <p
                         v-if="item.role === 'user'"
                         class="leading-7 whitespace-pre-wrap"
@@ -372,16 +410,6 @@ onMounted(() => {
                             </span>
                         </li>
                     </ul>
-                    <span
-                        v-if="
-                            item.role === 'assistant' &&
-                            processing &&
-                            index === messages.length - 1
-                        "
-                        class="animate-pulse"
-                        aria-label="Generating"
-                        >▍</span
-                    >
                 </article>
             </div>
         </section>

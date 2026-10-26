@@ -267,8 +267,12 @@ class ThreadController extends Controller
             ->get(['id', 'role', 'content']);
 
         $shouldSuggestTitle = $thread->title === 'New chat';
+        $question = (string) ($userMessage->content ?? '');
+        $shouldSearchLegislation = $this->shouldSearchLegislation($question);
+        $shouldSearchWeb = $this->shouldSearchWeb($question, $shouldSearchLegislation);
+        $shouldGenerateFile = $this->shouldGenerateFile($question);
 
-        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $thread): Generator {
+        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $shouldSearchLegislation, $shouldSearchWeb, $shouldGenerateFile, $question, $thread): Generator {
             $responseContent = $existingContent ?? '';
             $generatedPaths = [];
 
@@ -294,25 +298,46 @@ class ThreadController extends Controller
                             ->values(),
                     ]);
 
-                    $context = $this->legislationContextService->contextForQuestion((string) ($userMessage->content ?? ''));
+                    $context = null;
+
+                    if ($shouldSearchLegislation) {
+                        yield new StreamedEvent('activity', [
+                            'message' => 'Preparing relevant context',
+                        ]);
+                        $context = $this->legislationContextService->contextForQuestion($question);
+                    }
+
                     $toolCallCount = 0;
                     $fileGenerated = false;
                     $webSearchSources = [];
 
                     while (true) {
+                        yield new StreamedEvent('activity', [
+                            'message' => $toolCallCount === 0
+                                ? 'Thinking through your request'
+                                : 'Reviewing results and preparing your answer',
+                        ]);
                         $toolCalls = [];
+                        $isWritingResponse = false;
 
                         foreach ($this->llmService->stream(
                             $history,
                             context: $context,
-                            allowFileGeneration: ! $fileGenerated,
-                            allowLegislationSearch: true,
-                            allowWebSearch: true,
+                            allowFileGeneration: $shouldGenerateFile && ! $fileGenerated,
+                            allowLegislationSearch: $shouldSearchLegislation,
+                            allowWebSearch: $shouldSearchWeb,
                         ) as $streamEvent) {
                             if ($streamEvent instanceof LLMToolCall) {
                                 $toolCalls[] = $streamEvent;
 
                                 continue;
+                            }
+
+                            if (! $isWritingResponse) {
+                                yield new StreamedEvent('activity', [
+                                    'message' => 'Writing your response',
+                                ]);
+                                $isWritingResponse = true;
                             }
 
                             $responseContent .= $streamEvent;
@@ -344,6 +369,9 @@ class ThreadController extends Controller
                                 throw new RuntimeException('The LLM returned an invalid legislation search query.');
                             }
 
+                            yield new StreamedEvent('activity', [
+                                'message' => 'Searching legislative records',
+                            ]);
                             $toolResult = $this->legislationContextService->contextForQuestion(trim($query));
                         } elseif ($toolCall->name === 'search_web') {
                             $query = $toolCall->arguments['query'] ?? null;
@@ -352,6 +380,9 @@ class ThreadController extends Controller
                                 throw new RuntimeException('The LLM returned an invalid web search query.');
                             }
 
+                            yield new StreamedEvent('activity', [
+                                'message' => 'Searching the web',
+                            ]);
                             $searchResults = $this->tavilySearchService->search(trim($query));
 
                             foreach ($searchResults as $source) {
@@ -362,6 +393,9 @@ class ThreadController extends Controller
 
                             $toolResult = json_encode(['results' => $searchResults], JSON_THROW_ON_ERROR);
                         } elseif ($toolCall->name === 'generate_file' && ! $fileGenerated) {
+                            yield new StreamedEvent('activity', [
+                                'message' => 'Creating your file',
+                            ]);
                             $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
                             $generatedPaths[] = $generatedAttachment->path;
                             $fileGenerated = true;
@@ -408,12 +442,11 @@ class ThreadController extends Controller
                     }
 
                     if ($titlePrompt !== '') {
-                        try {
-                            $title = $this->llmService->suggestTitle($titlePrompt);
-                        } catch (Throwable $exception) {
-                            report($exception);
-                            $title = Str::limit(Str::squish($titlePrompt), 255, '');
-                        }
+                        yield new StreamedEvent('activity', [
+                            'message' => 'Naming this chat',
+                        ]);
+
+                        $title = Str::limit(Str::squish($titlePrompt), 255, '');
 
                         $thread->update(['title' => $title]);
                         yield new StreamedEvent('title', ['title' => $title]);
@@ -436,6 +469,59 @@ class ThreadController extends Controller
     private function authorizeThread(Request $request, Thread $thread): void
     {
         abort_unless($request->user()?->id === $thread->user_id, 404);
+    }
+
+    private function shouldSearchLegislation(string $question): bool
+    {
+        $mentionsLegislation = preg_match(
+            '/\b(?:legislation|legislative records?|bills?|ordinances?|resolutions?|proposals?|regulations?)\b/i',
+            $question,
+        ) === 1;
+        $asksForRecordLookup = preg_match(
+            '/\b(?:find|search|look up|show|list|which|who|when|how many|latest|newest|most recent|approved|proposed|pending|sponsored|authored|status|reference)\b/i',
+            $question,
+        ) === 1;
+        $mentionsNumberedRecord = preg_match(
+            '/(?<![\pL\pN])[\pL]{1,10}[-\/.]\d+(?:[-\/.]\d+)*(?![\pL\pN])|\b(?:bill|ordinance|resolution|proposal|regulation)\s*(?:no\.?|number)?\s*#?\d+\b/iu',
+            $question,
+        ) === 1;
+
+        return $mentionsNumberedRecord || ($mentionsLegislation && $asksForRecordLookup);
+    }
+
+    private function shouldSearchWeb(string $question, bool $shouldSearchLegislation): bool
+    {
+        $explicitWebSearch = preg_match(
+            '/\b(?:search|look up|browse|find|research|fact-check)\b.{0,40}\b(?:web|internet|online|sources?|citations?)\b|\b(?:cite|provide|include|link)\b.{0,30}\b(?:sources?|citations?|references?)\b/i',
+            $question,
+        ) === 1;
+        $volatileTopic = preg_match(
+            '/\b(?:news|weather|price|exchange rate|stock|schedule|scores?)\b/i',
+            $question,
+        ) === 1;
+        $asksForRecentInformation = preg_match(
+            '/\b(?:current|currently|today|right now|latest|recent|up[- ]to[- ]date)\b/i',
+            $question,
+        ) === 1;
+        $asksForDateOrTime = preg_match('/\b(?:date|time|year)\b/i', $question) === 1;
+        $currentInformation = ! $shouldSearchLegislation
+            && ($volatileTopic || ($asksForRecentInformation && ! $asksForDateOrTime));
+
+        return $explicitWebSearch || $currentInformation;
+    }
+
+    private function shouldGenerateFile(string $question): bool
+    {
+        $requestsFile = preg_match(
+            '/\b(?:create|generate|make|build|prepare|export|save|download|convert|turn|produce|need|attach)\b|\bdownloadable\b/i',
+            $question,
+        ) === 1;
+        $mentionsSupportedFormat = preg_match(
+            '/\b(?:pdf|docx|xlsx|excel|spreadsheet|workbook|word document)\b/i',
+            $question,
+        ) === 1;
+
+        return $requestsFile && $mentionsSupportedFormat;
     }
 
     /**

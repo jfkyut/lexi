@@ -453,6 +453,9 @@ test('matching legislation is added to the system context sent to the llm', func
     expect($response->streamedContent())->toContain('This is the matching proposal.');
 
     Http::assertSent(fn (ClientRequest $request): bool => $request->data()['messages'][0]['role'] === 'system'
+        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_legislation']
+        && str_contains($request->data()['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
+        && str_contains($request->data()['messages'][0]['content'], 'Do not use it for general explanations of laws or legal concepts.')
         && str_contains($request->data()['messages'][0]['content'], 'BILL-42')
         && str_contains($request->data()['messages'][0]['content'], 'Riverside water protection')
         && str_contains($request->data()['messages'][0]['content'], 'These are different identifiers: never treat them as interchangeable.')
@@ -524,8 +527,10 @@ test('the llm can search additional legislation records and use the results in i
         ->toContain('I found the Tricycle Franchise Regulation.')
         ->not->toContain('event: error');
 
-    Http::assertSent(fn (ClientRequest $request): bool => isset($request->data()['tools'][1]['function'])
-        && $request->data()['tools'][1]['function']['name'] === 'search_legislation'
+    Http::assertSent(fn (ClientRequest $request): bool => isset($request->data()['tools'][0]['function'])
+        && $request->data()['tools'][0]['function']['name'] === 'search_legislation'
+        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_legislation']
+        && str_contains($request->data()['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
         && str_contains($request->data()['messages'][0]['content'], 'Never claim you cannot access or search the connected records'));
 
     Http::assertSent(function (ClientRequest $request): bool {

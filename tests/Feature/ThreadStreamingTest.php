@@ -22,29 +22,20 @@ test('creating a chat stores its first message and streams the first reply in th
         'services.llm.model' => 'test-model',
     ]);
 
-    Http::fake(function (ClientRequest $request) {
-        $content = $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.'
-            ? ['Legislative Bill Overview']
-            : ['Hello', ' there'];
-
-        $events = '';
-
-        foreach ($content as $chunk) {
-            $events .= 'data: '.json_encode(['choices' => [['delta' => ['content' => $chunk]]]])."\n\n";
-        }
-
-        return Http::response(
-            $events."data: [DONE]\n\n",
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello there\"}}]}\n\n".
+            "data: [DONE]\n\n",
             200,
             ['Content-Type' => 'text/event-stream'],
-        );
-    });
+        ),
+    ]);
 
     $user = User::factory()->create();
     $this->actingAs($user);
 
     $createResponse = $this->post(route('threads.store'), [
-        'message' => 'Hi Lexi',
+        'message' => 'What is a bill?',
     ]);
     $thread = $user->threads()->firstOrFail();
     $firstMessage = $thread->messages()->firstOrFail();
@@ -65,7 +56,7 @@ test('creating a chat stores its first message and streams the first reply in th
         ->assertInertia(fn (Assert $page) => $page
             ->component('chat/Chat')
             ->where('pendingMessageId', $firstMessage->id)
-            ->where('messages.0.content', 'Hi Lexi'));
+            ->where('messages.0.content', 'What is a bill?'));
 
     $streamResponse = $this->post(route('threads.messages.store', $thread), [
         'message_id' => $firstMessage->id,
@@ -74,12 +65,15 @@ test('creating a chat stores its first message and streams the first reply in th
     $streamResponse->assertOk();
     expect($streamResponse->headers->get('Content-Type'))->toStartWith('text/event-stream');
     expect($streamResponse->streamedContent())
-        ->toContain('Hello')
-        ->toContain(' there')
-        ->toContain('"title":"Legislative Bill Overview"')
+        ->toContain('Hello there')
+        ->toContain('"message":"Thinking through your request"')
+        ->toContain('"message":"Writing your response"')
+        ->toContain('"message":"Naming this chat"')
+        ->toContain('"title":"What is a bill?"')
+        ->not->toContain('"message":"Preparing relevant context"')
         ->toContain("event: done\ndata: {}\n\n");
 
-    expect($thread->fresh()->title)->toBe('Legislative Bill Overview');
+    expect($thread->fresh()->title)->toBe('What is a bill?');
     $this->assertDatabaseHas('messages', [
         'thread_id' => $thread->id,
         'role' => 'assistant',
@@ -90,11 +84,9 @@ test('creating a chat stores its first message and streams the first reply in th
         && $request->data()['model'] === 'test-model'
         && $request->data()['stream'] === true
         && str_contains($request->data()['messages'][0]['content'], 'Supported chart types are `bar`, `line`, `area`, `pie`, and `doughnut`')
-        && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Hi Lexi']);
-    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://llm.test/v1/chat/completions'
-        && $request->data()['stream'] === true
-        && $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.'
-        && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Hi Lexi']);
+        && ! isset($request->data()['tools'])
+        && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'What is a bill?']);
+    Http::assertSentCount(1);
 });
 
 test('the assistant can search the web and include verified source links in its answer', function () {
@@ -172,6 +164,7 @@ test('the assistant can search the web and include verified source links in its 
     $response->assertOk();
     expect($response->streamedContent())
         ->toContain('The update is confirmed.')
+        ->toContain('"message":"Searching the web"')
         ->toContain('### Sources')
         ->toContain('Official update');
 
@@ -201,6 +194,9 @@ test('the assistant can search the web and include verified source links in its 
         return collect($data['tools'])->contains(
             fn (array $tool): bool => $tool['function']['name'] === 'search_web'
         )
+            && collect($data['tools'])->pluck('function.name')->all() === ['search_web']
+            && str_contains($data['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
+            && str_contains($data['messages'][0]['content'], 'Do not browse for stable general knowledge or casual questions.')
             && $lastMessage['role'] === 'tool'
             && str_contains($lastMessage['content'], 'Confirmed detail from the official update.');
     });
@@ -267,7 +263,7 @@ test('a web search service error stops the response and does not save an incompl
     Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://api.tavily.com/search');
 });
 
-test('a title generation failure falls back to the first message without interrupting the response', function () {
+test('a new chat uses its first message as the title without another llm request', function () {
     Http::preventStrayRequests();
 
     config([
@@ -276,18 +272,14 @@ test('a title generation failure falls back to the first message without interru
         'services.llm.model' => 'test-model',
     ]);
 
-    Http::fake(function (ClientRequest $request) {
-        if ($request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.') {
-            return Http::response(['error' => 'Unavailable'], 503);
-        }
-
-        return Http::response(
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n".
             "data: [DONE]\n\n",
             200,
             ['Content-Type' => 'text/event-stream'],
-        );
-    });
+        ),
+    ]);
 
     $user = User::factory()->create();
     $thread = $user->threads()->create(['title' => 'New chat']);
@@ -309,6 +301,7 @@ test('a title generation failure falls back to the first message without interru
         'role' => 'assistant',
         'content' => 'Hello',
     ]);
+    Http::assertSentCount(1);
 });
 
 test('a chat still using the default title is renamed from its first message on a later reply', function () {
@@ -320,21 +313,18 @@ test('a chat still using the default title is renamed from its first message on 
         'services.llm.model' => 'test-model',
     ]);
 
-    Http::fake(function (ClientRequest $request) {
-        $isTitleRequest = $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.';
-        $content = $isTitleRequest ? 'First Question Summary' : 'Second reply';
-
-        return Http::response(
-            'data: '.json_encode(['choices' => [['delta' => ['content' => $content]]]])."\n\n".
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Second reply\"}}]}\n\n".
             "data: [DONE]\n\n",
             200,
             ['Content-Type' => 'text/event-stream'],
-        );
-    });
+        ),
+    ]);
 
     $user = User::factory()->create();
     $thread = $user->threads()->create(['title' => 'New chat']);
-    $firstMessage = $thread->messages()->create([
+    $thread->messages()->create([
         'role' => 'user',
         'content' => 'Explain the first question',
     ]);
@@ -345,11 +335,14 @@ test('a chat still using the default title is renamed from its first message on 
     ]);
 
     $response->assertOk();
-    expect($response->streamedContent())->toContain('"title":"First Question Summary"');
-    expect($thread->fresh()->title)->toBe('First Question Summary');
+    expect($response->streamedContent())->toContain('"title":"Explain the first question"');
+    expect($thread->fresh()->title)->toBe('Explain the first question');
+    Http::assertSent(function (ClientRequest $request): bool {
+        $messages = $request->data()['messages'];
 
-    Http::assertSent(fn (ClientRequest $request): bool => $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.'
-        && $request->data()['messages'][1] === ['role' => 'user', 'content' => $firstMessage->content]);
+        return $messages[array_key_last($messages)] === ['role' => 'user', 'content' => 'A follow-up'];
+    });
+    Http::assertSentCount(1);
 });
 
 test('the chat page displays the saved conversation for its owner', function () {
@@ -757,6 +750,7 @@ test('provider failures are reported in the stream and do not save an empty assi
 
 test('message attachments are stored, included in the AI prompt, and generated files can be downloaded by their owner', function () {
     Http::preventStrayRequests();
+    config(['inertia.ssr.enabled' => false]);
 
     config([
         'services.llm.url' => 'https://llm.test/v1/chat/completions',
@@ -766,19 +760,14 @@ test('message attachments are stored, included in the AI prompt, and generated f
 
     Storage::fake('local');
 
-    Http::fake(function (ClientRequest $request) {
-        $isTitleRequest = $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.';
-        $content = $isTitleRequest
-            ? 'File Review'
-            : "Here is the summary.\n\n```summary.md\nImportant details from the note.\n```";
-
-        return Http::response(
-            'data: '.json_encode(['choices' => [['delta' => ['content' => $content]]]])."\n\n".
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
+            'data: '.json_encode(['choices' => [['delta' => ['content' => "Here is the summary.\n\n```summary.md\nImportant details from the note.\n```"]]]])."\n\n".
             "data: [DONE]\n\n",
             200,
             ['Content-Type' => 'text/event-stream'],
-        );
-    });
+        ),
+    ]);
 
     $user = User::factory()->create();
     $thread = $user->threads()->create(['title' => 'File review']);
@@ -957,7 +946,7 @@ test('AI tool calls create and deliver downloadable PDF DOCX and Excel files', f
     $user = User::factory()->create();
     $thread = $user->threads()->create(['title' => 'Generated file']);
     $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
-        'message' => 'Create this file for me.',
+        'message' => 'Create a downloadable '.$toolArguments['format'].' file for me.',
     ]);
 
     $response->assertOk();
@@ -1063,6 +1052,7 @@ test('AI tool calls create and deliver downloadable PDF DOCX and Excel files', f
 
     Http::assertSent(fn (ClientRequest $request): bool => isset($request->data()['tools'][0]['function'])
         && $request->data()['tools'][0]['function']['name'] === 'generate_file'
+        && collect($request->data()['tools'])->pluck('function.name')->all() === ['generate_file']
         && $request->data()['parallel_tool_calls'] === false);
     Http::assertSent(function (ClientRequest $request) use ($toolArguments): bool {
         $messages = $request->data()['messages'];
