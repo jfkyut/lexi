@@ -89,6 +89,7 @@ test('creating a chat stores its first message and streams the first reply in th
     Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://llm.test/v1/chat/completions'
         && $request->data()['model'] === 'test-model'
         && $request->data()['stream'] === true
+        && str_contains($request->data()['messages'][0]['content'], 'Supported chart types are `bar`, `line`, `area`, `pie`, and `doughnut`')
         && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Hi Lexi']);
     Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://llm.test/v1/chat/completions'
         && $request->data()['stream'] === true

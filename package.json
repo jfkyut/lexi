@@ -16,6 +16,8 @@
         "@laravel/passkeys": "^0.2.0",
         "@lucide/vue": "^1.17.0",
         "@vueuse/core": "^12.8.2",
+        "@unovis/ts": "1.7.1",
+        "@unovis/vue": "1.7.1",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "laravel-vite-plugin": "^3.0.0",
