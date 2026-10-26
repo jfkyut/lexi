@@ -41,4 +41,9 @@ return [
         'model' => env('LLM_MODEL'),
     ],
 
+    'tavily' => [
+        'url' => env('TAVILY_API_URL'),
+        'key' => env('TAVILY_API_KEY'),
+    ],
+
 ];

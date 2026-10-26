@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -93,6 +94,176 @@ test('creating a chat stores its first message and streams the first reply in th
         && $request->data()['stream'] === true
         && $request->data()['messages'][0]['content'] === 'Suggest a concise, descriptive title for this chat in 2 to 6 words. Return only the title, with no quotation marks or explanation.'
         && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Hi Lexi']);
+});
+
+test('the assistant can search the web and include verified source links in its answer', function () {
+    Http::preventStrayRequests();
+
+    $this->travelTo(Carbon::parse('2026-10-26 10:00:00', 'Asia/Manila'));
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+        'services.tavily.key' => 'tavily-test-key',
+    ]);
+
+    $toolCall = [
+        'choices' => [[
+            'delta' => [
+                'tool_calls' => [[
+                    'index' => 0,
+                    'id' => 'call_web_search',
+                    'type' => 'function',
+                    'function' => [
+                        'name' => 'search_web',
+                        'arguments' => json_encode(['query' => 'recent public update'], JSON_THROW_ON_ERROR),
+                    ],
+                ]],
+            ],
+        ]],
+    ];
+
+    Http::fake(function (ClientRequest $request) use ($toolCall) {
+        if ($request->url() === 'https://api.tavily.com/search') {
+            return Http::response([
+                'results' => [[
+                    'title' => 'Official update',
+                    'url' => 'https://example.org/update',
+                    'content' => 'Confirmed detail from the official update.',
+                ]],
+            ]);
+        }
+
+        $messages = $request->data()['messages'];
+        $lastMessage = end($messages);
+
+        if ($lastMessage['role'] === 'tool') {
+            return Http::response(
+                'data: '.json_encode([
+                    'choices' => [[
+                        'delta' => [
+                            'content' => 'The update is confirmed. [Official update](https://example.org/update).',
+                        ],
+                    ]],
+                ], JSON_THROW_ON_ERROR)."\n\n".
+                "data: [DONE]\n\n",
+                200,
+                ['Content-Type' => 'text/event-stream'],
+            );
+        }
+
+        return Http::response(
+            'data: '.json_encode($toolCall, JSON_THROW_ON_ERROR)."\n\n".
+            "data: [DONE]\n\n",
+            200,
+            ['Content-Type' => 'text/event-stream'],
+        );
+    });
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Web research']);
+
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => 'Find the recent public update and cite the source.',
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())
+        ->toContain('The update is confirmed.')
+        ->toContain('### Sources')
+        ->toContain('Official update');
+
+    $this->assertDatabaseHas('messages', [
+        'thread_id' => $thread->id,
+        'role' => 'assistant',
+        'content' => "The update is confirmed. [Official update](https://example.org/update).\n\n".
+            "### Sources\n\n".
+            '- [Official update](https://example.org/update)',
+    ]);
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://api.tavily.com/search'
+        && $request->data()['query'] === 'recent public update'
+        && $request->data()['search_depth'] === 'basic'
+        && $request->data()['max_results'] === 5);
+    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://llm.test/v1/chat/completions'
+        && str_contains($request->data()['messages'][0]['content'], 'Monday, October 26, 2026 10:00:00 AM Asia/Manila (+08:00)'));
+    Http::assertSent(function (ClientRequest $request): bool {
+        if ($request->url() !== 'https://llm.test/v1/chat/completions') {
+            return false;
+        }
+
+        $data = $request->data();
+        $messages = $data['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        return collect($data['tools'])->contains(
+            fn (array $tool): bool => $tool['function']['name'] === 'search_web'
+        )
+            && $lastMessage['role'] === 'tool'
+            && str_contains($lastMessage['content'], 'Confirmed detail from the official update.');
+    });
+});
+
+test('a web search service error stops the response and does not save an incomplete assistant message', function () {
+    Http::preventStrayRequests();
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+        'services.tavily.key' => 'tavily-test-key',
+    ]);
+
+    $toolCall = [
+        'choices' => [[
+            'delta' => [
+                'tool_calls' => [[
+                    'index' => 0,
+                    'id' => 'call_web_search',
+                    'type' => 'function',
+                    'function' => [
+                        'name' => 'search_web',
+                        'arguments' => json_encode(['query' => 'recent public update'], JSON_THROW_ON_ERROR),
+                    ],
+                ]],
+            ],
+        ]],
+    ];
+
+    Http::fake(function (ClientRequest $request) use ($toolCall) {
+        if ($request->url() === 'https://api.tavily.com/search') {
+            return Http::response(['error' => 'Unavailable'], 503);
+        }
+
+        return Http::response(
+            'data: '.json_encode($toolCall, JSON_THROW_ON_ERROR)."\n\n".
+            "data: [DONE]\n\n",
+            200,
+            ['Content-Type' => 'text/event-stream'],
+        );
+    });
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Web research']);
+
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => 'Find the recent public update.',
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())->toContain('event: error');
+    $this->assertDatabaseHas('messages', [
+        'thread_id' => $thread->id,
+        'role' => 'user',
+        'content' => 'Find the recent public update.',
+    ]);
+    $this->assertDatabaseMissing('messages', [
+        'thread_id' => $thread->id,
+        'role' => 'assistant',
+    ]);
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://api.tavily.com/search');
 });
 
 test('a title generation failure falls back to the first message without interrupting the response', function () {

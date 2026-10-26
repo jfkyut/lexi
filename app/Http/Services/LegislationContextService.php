@@ -77,8 +77,6 @@ class LegislationContextService
 
     private const MAX_SEARCH_TERMS = 8;
 
-    private const MAX_RESULTS = 20;
-
     private const MAX_RELATED_NAMES = 20;
 
     private const MAX_CONTEXT_CHARACTERS = 50000;
@@ -208,7 +206,6 @@ class LegislationContextService
         $records = $query
             ->orderByRaw('('.implode(' + ', $scoreExpressions).') DESC', $scoreBindings)
             ->orderBy('documents.id')
-            ->limit(self::MAX_RESULTS)
             ->get()
             ->all();
 

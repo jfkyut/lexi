@@ -7,6 +7,7 @@ use App\Http\Services\GeneratedFileService;
 use App\Http\Services\LegislationContextService;
 use App\Http\Services\LLMService;
 use App\Http\Services\LLMToolCall;
+use App\Http\Services\TavilySearchService;
 use App\Models\Attachment;
 use App\Models\Message;
 use App\Models\Thread;
@@ -39,6 +40,7 @@ class ThreadController extends Controller
     public function __construct(
         protected LLMService $llmService,
         protected LegislationContextService $legislationContextService,
+        protected TavilySearchService $tavilySearchService,
         protected AttachmentPromptService $attachmentPromptService,
         protected GeneratedFileService $generatedFileService,
     ) {}
@@ -295,6 +297,7 @@ class ThreadController extends Controller
                     $context = $this->legislationContextService->contextForQuestion((string) ($userMessage->content ?? ''));
                     $toolCallCount = 0;
                     $fileGenerated = false;
+                    $webSearchSources = [];
 
                     while (true) {
                         $toolCalls = [];
@@ -304,6 +307,7 @@ class ThreadController extends Controller
                             context: $context,
                             allowFileGeneration: ! $fileGenerated,
                             allowLegislationSearch: true,
+                            allowWebSearch: true,
                         ) as $streamEvent) {
                             if ($streamEvent instanceof LLMToolCall) {
                                 $toolCalls[] = $streamEvent;
@@ -341,6 +345,22 @@ class ThreadController extends Controller
                             }
 
                             $toolResult = $this->legislationContextService->contextForQuestion(trim($query));
+                        } elseif ($toolCall->name === 'search_web') {
+                            $query = $toolCall->arguments['query'] ?? null;
+
+                            if (! is_string($query) || trim($query) === '' || mb_strlen($query) > 500) {
+                                throw new RuntimeException('The LLM returned an invalid web search query.');
+                            }
+
+                            $searchResults = $this->tavilySearchService->search(trim($query));
+
+                            foreach ($searchResults as $source) {
+                                if (! isset($webSearchSources[$source['url']]) && count($webSearchSources) < 10) {
+                                    $webSearchSources[$source['url']] = $source;
+                                }
+                            }
+
+                            $toolResult = json_encode(['results' => $searchResults], JSON_THROW_ON_ERROR);
                         } elseif ($toolCall->name === 'generate_file' && ! $fileGenerated) {
                             $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
                             $generatedPaths[] = $generatedAttachment->path;
@@ -358,6 +378,13 @@ class ThreadController extends Controller
                             'tool_call_id' => $toolCall->id,
                             'content' => $toolResult,
                         ];
+                    }
+
+                    $sourcesContent = $this->tavilySearchService->formatSources(array_values($webSearchSources));
+
+                    if ($sourcesContent !== '') {
+                        $responseContent .= $sourcesContent;
+                        yield ['content' => $sourcesContent];
                     }
 
                     $assistantMessage->update(['content' => $responseContent]);

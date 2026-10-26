@@ -125,6 +125,25 @@ test('legislation context includes matching reference numbers and titles', funct
         ->toContain('metadata, not the full text');
 });
 
+test('legislation context includes all matching records within the context budget', function () {
+    $records = [];
+
+    for ($id = 1; $id <= 25; $id++) {
+        $records[] = [
+            'id' => $id,
+            'title' => "Water ordinance {$id}",
+            'reference_no' => "ORD-2026-{$id}",
+        ];
+    }
+
+    DB::connection('legacy')->table('documents')->insert($records);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('water');
+
+    expect(substr_count($context, '"title": "Water ordinance '))->toBe(25)
+        ->and(mb_strlen($context))->toBeLessThanOrEqual(50000);
+});
+
 test('legislation context selects approved records for ordinance requests', function () {
     DB::connection('legacy')->table('document_statuses')->insert([
         ['id' => 1, 'name' => 'proposal'],

@@ -8,6 +8,7 @@ supported attachments, and create downloadable documents.
 
 - Authenticated conversations with streamed assistant responses.
 - Legislative-record lookup through a connected, read-only MariaDB database.
+- On-demand web research with clickable source citations.
 - Attachment support for images, PDFs, DOCX, and text files.
 - Downloadable PDF, DOCX, and Excel workbook generation when requested.
 - Conversation and attachment storage in the application database.
@@ -25,6 +26,7 @@ source of unverified legal provisions.
 - SQLite for the default application database, or another database configured
   for Laravel.
 - Access to an OpenAI-compatible chat-completions API.
+- A Tavily API key for on-demand web search.
 - Access to the legacy MariaDB database for legislative search.
 
 ## Setup
@@ -63,6 +65,7 @@ Set these values in `.env`:
 | `LLM_URL` | Full chat-completions endpoint URL, such as `https://api.example.com/v1/chat/completions`. |
 | `LLM_API_KEY` | API key for the configured LLM provider. |
 | `LLM_MODEL` | Model name supported by that provider. |
+| `TAVILY_API_KEY` | API key used when the assistant searches the public web. |
 | `DB_CONNECTION` | Application database driver; defaults to `sqlite`. |
 | `LEGACY_DB_HOST` | Host for the legislation MariaDB database. |
 | `LEGACY_DB_PORT` | MariaDB port; defaults to `3306`. |
@@ -75,7 +78,8 @@ read-only database account for it. Legislative search expects the existing
 legacy schema, including its documents, statuses, types, authors, sponsors,
 committees, and council records. Without a working LLM configuration, chat
 responses cannot be generated; without the legacy connection, legislative
-lookup is unavailable.
+lookup is unavailable. Without a working Tavily key, external web searches
+cannot be completed.
 
 Do not commit `.env` or put API keys and database credentials in source
 control.
