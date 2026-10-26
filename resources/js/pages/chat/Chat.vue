@@ -360,23 +360,17 @@ onMounted(() => {
                         />
                         <span>{{ activity }}</span>
                     </div>
-                    <span
-                        v-if="
-                            item.role === 'assistant' &&
-                            processing &&
-                            index === messages.length - 1
-                        "
-                        class="animate-pulse"
-                        aria-label="Generating"
-                        >▍</span
-                    >
                     <p
                         v-if="item.role === 'user'"
                         class="leading-7 whitespace-pre-wrap"
                     >
                         {{ item.content }}
                     </p>
-                    <ChatMessageContent v-else :content="item.content" />
+                    <ChatMessageContent
+                        v-else
+                        :content="item.content"
+                        :streaming="processing && index === messages.length - 1"
+                    />
                     <ul
                         v-if="item.attachments?.length"
                         class="mt-3 flex flex-wrap gap-2"

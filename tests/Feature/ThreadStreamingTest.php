@@ -191,14 +191,207 @@ test('the assistant can search the web and include verified source links in its 
         $messages = $data['messages'];
         $lastMessage = $messages[array_key_last($messages)];
 
-        return collect($data['tools'])->contains(
-            fn (array $tool): bool => $tool['function']['name'] === 'search_web'
-        )
+        return $lastMessage['role'] === 'user'
+            && collect($data['tools'])->contains(
+                fn (array $tool): bool => $tool['function']['name'] === 'search_web'
+            )
             && collect($data['tools'])->pluck('function.name')->all() === ['search_web']
             && str_contains($data['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
-            && str_contains($data['messages'][0]['content'], 'Do not browse for stable general knowledge or casual questions.')
-            && $lastMessage['role'] === 'tool'
+            && str_contains($data['messages'][0]['content'], 'Do not browse for stable general knowledge or casual questions.');
+    });
+    Http::assertSent(function (ClientRequest $request): bool {
+        if ($request->url() !== 'https://llm.test/v1/chat/completions') {
+            return false;
+        }
+
+        $data = $request->data();
+        $messages = $data['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        return $lastMessage['role'] === 'tool'
+            && ! isset($data['tools'])
+            && ! isset($data['tool_choice'])
             && str_contains($lastMessage['content'], 'Confirmed detail from the official update.');
+    });
+});
+
+test('a previous tool-using turn does not enable tools for a direct follow-up', function () {
+    Http::preventStrayRequests();
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+    ]);
+
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"An umbrella keeps you dry.\"}}]}\n\n".
+            "data: [DONE]\n\n",
+            200,
+            ['Content-Type' => 'text/event-stream'],
+        ),
+    ]);
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Weather question']);
+    $thread->messages()->create([
+        'role' => 'user',
+        'content' => "Search the web for today's weather.",
+    ]);
+    $thread->messages()->create([
+        'role' => 'assistant',
+        'content' => "I searched the web and found today's forecast.",
+    ]);
+
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => 'Thanks. What is an umbrella for?',
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())->toContain('An umbrella keeps you dry.');
+    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://llm.test/v1/chat/completions'
+        && ! isset($request->data()['tools'])
+        && $request->data()['messages'][array_key_last($request->data()['messages'])] === [
+            'role' => 'user',
+            'content' => 'Thanks. What is an umbrella for?',
+        ]);
+});
+
+test('the assistant can switch to another relevant tool after using one tool', function () {
+    Http::preventStrayRequests();
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+        'services.tavily.key' => 'tavily-test-key',
+    ]);
+    Storage::fake('local');
+
+    $searchResponse = 'data: '.json_encode([
+        'choices' => [[
+            'delta' => [
+                'tool_calls' => [[
+                    'index' => 0,
+                    'id' => 'call_search',
+                    'type' => 'function',
+                    'function' => [
+                        'name' => 'search_web',
+                        'arguments' => json_encode(['query' => 'current exchange rate'], JSON_THROW_ON_ERROR),
+                    ],
+                ]],
+            ],
+        ]],
+    ], JSON_THROW_ON_ERROR)."\n\n".
+        "data: [DONE]\n\n";
+    $fileResponse = 'data: '.json_encode([
+        'choices' => [[
+            'delta' => [
+                'tool_calls' => [[
+                    'index' => 0,
+                    'id' => 'call_file',
+                    'type' => 'function',
+                    'function' => [
+                        'name' => 'generate_file',
+                        'arguments' => json_encode([
+                            'format' => 'xlsx',
+                            'filename' => 'exchange-rate.xlsx',
+                            'title' => 'Current Exchange Rate',
+                            'headers' => ['Currency', 'Rate'],
+                            'rows' => [['USD', '1.00']],
+                        ], JSON_THROW_ON_ERROR),
+                    ],
+                ]],
+            ],
+        ]],
+    ], JSON_THROW_ON_ERROR)."\n\n".
+        "data: [DONE]\n\n";
+
+    Http::fake(function (ClientRequest $request) use ($searchResponse, $fileResponse) {
+        if ($request->url() === 'https://api.tavily.com/search') {
+            return Http::response([
+                'results' => [[
+                    'title' => 'Exchange rate',
+                    'url' => 'https://example.org/rate',
+                    'content' => 'USD rate: 1.00.',
+                ]],
+            ]);
+        }
+
+        $messages = $request->data()['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        if ($lastMessage['role'] === 'tool' && $lastMessage['tool_call_id'] === 'call_search') {
+            return Http::response($fileResponse, 200, ['Content-Type' => 'text/event-stream']);
+        }
+
+        if ($lastMessage['role'] === 'tool') {
+            return Http::response(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Your workbook is ready.\"}}]}\n\n".
+                "data: [DONE]\n\n",
+                200,
+                ['Content-Type' => 'text/event-stream'],
+            );
+        }
+
+        return Http::response($searchResponse, 200, ['Content-Type' => 'text/event-stream']);
+    });
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Exchange rates']);
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => "Search today's exchange rate and create a downloadable Excel workbook with the result.",
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())
+        ->toContain('Your workbook is ready.')
+        ->toContain('Exchange rate')
+        ->not->toContain('event: error');
+
+    $assistantMessage = $thread->messages()->where('role', 'assistant')->firstOrFail();
+    $attachment = $assistantMessage->attachments()->firstOrFail();
+    expect($attachment->filename)->toBe('exchange-rate.xlsx');
+    Storage::disk('local')->assertExists($attachment->path);
+
+    Http::assertSent(function (ClientRequest $request): bool {
+        if ($request->url() !== 'https://llm.test/v1/chat/completions') {
+            return false;
+        }
+
+        $data = $request->data();
+        $messages = $data['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        return $lastMessage['role'] === 'user'
+            && collect($data['tools'])->pluck('function.name')->all() === ['generate_file', 'search_web'];
+    });
+    Http::assertSent(function (ClientRequest $request): bool {
+        if ($request->url() !== 'https://llm.test/v1/chat/completions') {
+            return false;
+        }
+
+        $data = $request->data();
+        $messages = $data['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        return $lastMessage['role'] === 'tool'
+            && $lastMessage['tool_call_id'] === 'call_search'
+            && collect($data['tools'])->pluck('function.name')->all() === ['generate_file'];
+    });
+    Http::assertSent(function (ClientRequest $request): bool {
+        if ($request->url() !== 'https://llm.test/v1/chat/completions') {
+            return false;
+        }
+
+        $data = $request->data();
+        $messages = $data['messages'];
+        $lastMessage = $messages[array_key_last($messages)];
+
+        return $lastMessage['role'] === 'tool'
+            && $lastMessage['tool_call_id'] === 'call_file'
+            && ! isset($data['tools']);
     });
 });
 

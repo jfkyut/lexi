@@ -446,23 +446,32 @@ test('matching legislation is added to the system context sent to the llm', func
     $thread = $user->threads()->create(['title' => 'Legislation question']);
 
     $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
-        'message' => 'Tell me about BILL-42',
+        'message' => 'Search proposed legislation about Riverside water protection.',
     ]);
 
     $response->assertOk();
     expect($response->streamedContent())->toContain('This is the matching proposal.');
 
     Http::assertSent(fn (ClientRequest $request): bool => $request->data()['messages'][0]['role'] === 'system'
+        && str_contains($request->data()['messages'][0]['content'], 'AI assistant serving the Legislative Office of the Local Government Unit (LGU) of San Vicente, Palawan.')
         && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_legislation']
+        && str_contains($request->data()['messages'][0]['content'], 'The connected legacy legislative records database is called Letras.')
+        && str_contains($request->data()['messages'][0]['content'], 'When a user asks about records in Letras, they mean the connected legislative records available through the search_legislation tool.')
         && str_contains($request->data()['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
-        && str_contains($request->data()['messages'][0]['content'], 'Do not use it for general explanations of laws or legal concepts.')
+        && str_contains($request->data()['messages'][0]['content'], 'but not for general explanations of laws or legal concepts.')
+        && str_contains($request->data()['messages'][0]['content'], 'interpret that as a database lookup')
+        && str_contains($request->data()['messages'][0]['content'], 'Do not call search_web to locate, confirm, or supplement local legislative record existence, status, or metadata.')
+        && $request->data()['tools'][0]['function']['description'] === 'Search the connected local legislative records database for proposed, pending, or approved records and their metadata. Use this instead of web search for local legislative record lookups.'
         && str_contains($request->data()['messages'][0]['content'], 'BILL-42')
         && str_contains($request->data()['messages'][0]['content'], 'Riverside water protection')
         && str_contains($request->data()['messages'][0]['content'], 'These are different identifiers: never treat them as interchangeable.')
         && str_contains($request->data()['messages'][0]['content'], '"final_legislation_number": "ORD-2024-18"')
         && str_contains($request->data()['messages'][0]['content'], '"proposal_number": "BILL-42"')
         && str_contains($request->data()['messages'][0]['content'], '"document_type": "tax_ordinance"')
-        && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'Tell me about BILL-42']);
+        && $request->data()['messages'][1] === [
+            'role' => 'user',
+            'content' => 'Search proposed legislation about Riverside water protection.',
+        ]);
 });
 
 test('the llm can search additional legislation records and use the results in its reply', function () {

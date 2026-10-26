@@ -37,6 +37,7 @@ type ChartConfiguration = {
 
 const props = defineProps<{
     content: string | null;
+    streaming?: boolean;
 }>();
 
 const copiedBlock = ref<number | null>(null);
@@ -390,12 +391,21 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
 
 <template>
     <div class="flex min-w-0 flex-col gap-4 break-words">
+        <span
+            v-if="streaming && blocks.length === 0"
+            class="ml-0.5 inline-block animate-pulse"
+            aria-hidden="true"
+            >▍</span
+        >
         <template v-for="(block, index) in blocks" :key="index">
             <p
                 v-if="block.type === 'paragraph'"
                 class="leading-7 whitespace-pre-wrap"
             >
-                <MarkdownInline :nodes="block.inline" />
+                <MarkdownInline
+                    :nodes="block.inline"
+                    :typing="streaming && index === blocks.length - 1"
+                />
             </p>
 
             <component
@@ -404,7 +414,10 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 class="font-semibold tracking-tight"
                 :class="block.level <= 2 ? 'text-xl' : 'text-lg'"
             >
-                <MarkdownInline :nodes="block.inline" />
+                <MarkdownInline
+                    :nodes="block.inline"
+                    :typing="streaming && index === blocks.length - 1"
+                />
             </component>
 
             <ul
@@ -412,7 +425,14 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 class="list-disc space-y-1.5 pl-6 leading-7 marker:text-muted-foreground"
             >
                 <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
-                    <MarkdownInline :nodes="item" />
+                    <MarkdownInline
+                        :nodes="item"
+                        :typing="
+                            streaming &&
+                            index === blocks.length - 1 &&
+                            itemIndex === block.items.length - 1
+                        "
+                    />
                 </li>
             </ul>
 
@@ -421,7 +441,14 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 class="list-decimal space-y-1.5 pl-6 leading-7 marker:text-muted-foreground"
             >
                 <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
-                    <MarkdownInline :nodes="item" />
+                    <MarkdownInline
+                        :nodes="item"
+                        :typing="
+                            streaming &&
+                            index === blocks.length - 1 &&
+                            itemIndex === block.items.length - 1
+                        "
+                    />
                 </li>
             </ol>
 
@@ -429,7 +456,10 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 v-else-if="block.type === 'quote'"
                 class="border-l-2 border-primary/40 pl-4 text-muted-foreground"
             >
-                <MarkdownInline :nodes="block.inline" />
+                <MarkdownInline
+                    :nodes="block.inline"
+                    :typing="streaming && index === blocks.length - 1"
+                />
             </blockquote>
 
             <hr v-else-if="block.type === 'rule'" class="border-border" />
@@ -446,7 +476,15 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                                 :key="cellIndex"
                                 class="border-b border-border px-3 py-2 font-semibold"
                             >
-                                <MarkdownInline :nodes="cell" />
+                                <MarkdownInline
+                                    :nodes="cell"
+                                    :typing="
+                                        streaming &&
+                                        index === blocks.length - 1 &&
+                                        block.rows.length === 0 &&
+                                        cellIndex === block.headers.length - 1
+                                    "
+                                />
                             </th>
                         </tr>
                     </thead>
@@ -461,7 +499,15 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                                 :key="cellIndex"
                                 class="border-b border-border/70 px-3 py-2 last:border-b-0"
                             >
-                                <MarkdownInline :nodes="cell" />
+                                <MarkdownInline
+                                    :nodes="cell"
+                                    :typing="
+                                        streaming &&
+                                        index === blocks.length - 1 &&
+                                        rowIndex === block.rows.length - 1 &&
+                                        cellIndex === row.length - 1
+                                    "
+                                />
                             </td>
                         </tr>
                     </tbody>
@@ -501,7 +547,14 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 </div>
                 <pre
                     class="overflow-x-auto p-4 text-sm leading-6"
-                ><code class="font-mono">{{ block.code }}</code></pre>
+                ><code class="font-mono"
+                    >{{ block.code }}<span
+                        v-if="streaming && index === blocks.length - 1"
+                        class="ml-0.5 inline-block animate-pulse"
+                        aria-hidden="true"
+                        >▍</span
+                    ></code
+                ></pre>
             </div>
 
             <ChatChart
@@ -510,6 +563,17 @@ async function copyCode(code: string, blockIndex: number): Promise<void> {
                 :title="block.title"
                 :data="block.data"
             />
+
+            <span
+                v-if="
+                    streaming &&
+                    index === blocks.length - 1 &&
+                    (block.type === 'chart' || block.type === 'rule')
+                "
+                class="ml-0.5 inline-block animate-pulse"
+                aria-hidden="true"
+                >▍</span
+            >
         </template>
     </div>
 </template>

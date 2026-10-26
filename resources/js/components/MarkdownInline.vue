@@ -4,9 +4,15 @@ export type InlineNode =
     | { type: 'strong' | 'em' | 'del' | 'inline-code'; text: string }
     | { type: 'link'; text: string; href: string };
 
-defineProps<{
-    nodes: InlineNode[];
-}>();
+withDefaults(
+    defineProps<{
+        nodes: InlineNode[];
+        typing?: boolean;
+    }>(),
+    {
+        typing: false,
+    },
+);
 </script>
 
 <template>
@@ -31,4 +37,10 @@ defineProps<{
         >
         <span v-else>{{ node.text }}</span>
     </template>
+    <span
+        v-if="typing"
+        class="ml-0.5 inline-block animate-pulse"
+        aria-hidden="true"
+        >▍</span
+    >
 </template>

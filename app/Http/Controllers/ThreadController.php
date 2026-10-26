@@ -308,7 +308,7 @@ class ThreadController extends Controller
                     }
 
                     $toolCallCount = 0;
-                    $fileGenerated = false;
+                    $usedToolNames = [];
                     $webSearchSources = [];
 
                     while (true) {
@@ -317,15 +317,18 @@ class ThreadController extends Controller
                                 ? 'Thinking through your request'
                                 : 'Reviewing results and preparing your answer',
                         ]);
+                        $allowFileGeneration = $shouldGenerateFile && ! isset($usedToolNames['generate_file']);
+                        $allowLegislationSearch = $shouldSearchLegislation && ! isset($usedToolNames['search_legislation']);
+                        $allowWebSearch = $shouldSearchWeb && ! isset($usedToolNames['search_web']);
                         $toolCalls = [];
                         $isWritingResponse = false;
 
                         foreach ($this->llmService->stream(
                             $history,
                             context: $context,
-                            allowFileGeneration: $shouldGenerateFile && ! $fileGenerated,
-                            allowLegislationSearch: $shouldSearchLegislation,
-                            allowWebSearch: $shouldSearchWeb,
+                            allowFileGeneration: $allowFileGeneration,
+                            allowLegislationSearch: $allowLegislationSearch,
+                            allowWebSearch: $allowWebSearch,
                         ) as $streamEvent) {
                             if ($streamEvent instanceof LLMToolCall) {
                                 $toolCalls[] = $streamEvent;
@@ -355,6 +358,18 @@ class ThreadController extends Controller
                         }
 
                         $toolCall = $toolCalls[0];
+                        $toolIsAvailable = match ($toolCall->name) {
+                            'generate_file' => $allowFileGeneration,
+                            'search_legislation' => $allowLegislationSearch,
+                            'search_web' => $allowWebSearch,
+                            default => false,
+                        };
+
+                        if (! $toolIsAvailable) {
+                            throw new RuntimeException('The LLM requested an unavailable or repeated tool operation.');
+                        }
+
+                        $usedToolNames[$toolCall->name] = true;
 
                         $history[] = [
                             'role' => 'assistant',
@@ -392,19 +407,18 @@ class ThreadController extends Controller
                             }
 
                             $toolResult = json_encode(['results' => $searchResults], JSON_THROW_ON_ERROR);
-                        } elseif ($toolCall->name === 'generate_file' && ! $fileGenerated) {
+                        } elseif ($toolCall->name === 'generate_file') {
                             yield new StreamedEvent('activity', [
                                 'message' => 'Creating your file',
                             ]);
                             $generatedAttachment = $this->generatedFileService->generate($assistantMessage, $toolCall);
                             $generatedPaths[] = $generatedAttachment->path;
-                            $fileGenerated = true;
                             $toolResult = json_encode([
                                 'success' => true,
                                 'filename' => $generatedAttachment->filename,
                             ], JSON_THROW_ON_ERROR);
                         } else {
-                            throw new RuntimeException('The LLM requested an unsupported or repeated tool operation.');
+                            throw new RuntimeException('The LLM requested an unsupported tool operation.');
                         }
 
                         $history[] = [
