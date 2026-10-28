@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Services\LegislationContextService;
 use App\Models\User;
+use App\Services\LegislationContextService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\DB;

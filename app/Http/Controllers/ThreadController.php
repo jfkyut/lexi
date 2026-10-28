@@ -2,15 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Services\AttachmentPromptService;
-use App\Http\Services\GeneratedFileService;
-use App\Http\Services\LegislationContextService;
-use App\Http\Services\LLMService;
-use App\Http\Services\LLMToolCall;
-use App\Http\Services\TavilySearchService;
 use App\Models\Attachment;
 use App\Models\Message;
 use App\Models\Thread;
+use App\Services\AttachmentPromptService;
+use App\Services\GeneratedFileService;
+use App\Services\LegislationContextService;
+use App\Services\LLMService;
+use App\Services\LLMToolCall;
+use App\Services\TavilySearchService;
 use Generator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;

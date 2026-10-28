@@ -123,7 +123,7 @@ Build production assets with `npm run build`.
 ## Project layout
 
 - `app/Http/Controllers` — chat, attachment, and account request handling.
-- `app/Http/Services` — LLM integration, legislative lookup, attachment
+- `app/Services` — LLM integration, legislative lookup, attachment
   analysis, and generated-file handling.
 - `resources/js` — Vue and Inertia frontend.
 - `routes` — web and account settings routes.
