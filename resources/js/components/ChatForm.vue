@@ -36,6 +36,60 @@ const emit = defineEmits<{
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const fileError = ref('');
+const isDraggingFiles = ref(false);
+let dragDepth = 0;
+
+function isFileDrag(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function handleDragEnter(event: DragEvent): void {
+    if (!isFileDrag(event)) {
+        return;
+    }
+
+    event.preventDefault();
+
+    if (!props.processing) {
+        dragDepth += 1;
+        isDraggingFiles.value = true;
+    }
+}
+
+function handleDragOver(event: DragEvent): void {
+    if (!isFileDrag(event)) {
+        return;
+    }
+
+    event.preventDefault();
+
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = props.processing ? 'none' : 'copy';
+    }
+}
+
+function handleDragLeave(event: DragEvent): void {
+    if (!isFileDrag(event)) {
+        return;
+    }
+
+    dragDepth = Math.max(0, dragDepth - 1);
+    isDraggingFiles.value = dragDepth > 0;
+}
+
+function handleDrop(event: DragEvent): void {
+    if (!isFileDrag(event)) {
+        return;
+    }
+
+    event.preventDefault();
+    dragDepth = 0;
+    isDraggingFiles.value = false;
+
+    if (!props.processing) {
+        addFiles(Array.from(event.dataTransfer?.files ?? []));
+    }
+}
 
 function submitMessage(): void {
     const content = props.modelValue.trim();
@@ -127,10 +181,25 @@ function handleEnter(event: KeyboardEvent): void {
         class="mx-auto flex w-full flex-col gap-2"
         :class="props.centered ? 'max-w-2xl' : 'max-w-3xl'"
         @submit.prevent="submitMessage"
+        @dragenter="handleDragEnter"
+        @dragover="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop"
     >
         <div
-            class="flex flex-col rounded-xl border border-input bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30"
+            class="relative flex flex-col rounded-xl border border-input bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30"
+            :class="{
+                'border-primary border-dashed': isDraggingFiles,
+            }"
         >
+            <div
+                v-if="isDraggingFiles"
+                class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-xl bg-background/95 text-sm font-medium text-primary"
+                aria-live="polite"
+            >
+                <Paperclip class="size-4" aria-hidden="true" />
+                Drop files to attach
+            </div>
             <div
                 v-if="props.files.length > 0"
                 class="flex flex-wrap gap-2 px-3 pt-3"
