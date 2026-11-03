@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import Button from '@/components/ui/button/Button.vue';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2Icon, Paperclip, Send, X } from '@lucide/vue';
@@ -37,6 +37,18 @@ const emit = defineEmits<{
 const fileInput = ref<HTMLInputElement | null>(null);
 const fileError = ref('');
 const isDraggingFiles = ref(false);
+const isLegislationDraftRequest = computed(() => {
+    const asksToDraft =
+        /\b(?:draft|write|prepare|create|compose|develop|formulate|propose|outline)\w*\b/i.test(
+            props.modelValue,
+        );
+    const mentionsLegislation =
+        /\b(?:legislation|legislative|law|ordinance|resolution|bill|statute|regulation|bylaw|amendment)\w*\b/i.test(
+            props.modelValue,
+        );
+
+    return asksToDraft && mentionsLegislation;
+});
 let dragDepth = 0;
 
 function isFileDrag(event: DragEvent): boolean {
@@ -136,7 +148,9 @@ function selectFiles(event: Event): void {
 
 function pasteFiles(event: ClipboardEvent): void {
     const imageFiles = Array.from(event.clipboardData?.items ?? [])
-        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .filter(
+            (item) => item.kind === 'file' && item.type.startsWith('image/'),
+        )
         .map((item) => item.getAsFile())
         .filter((file): file is File => file !== null)
         .map((file, index) => {
@@ -189,7 +203,7 @@ function handleEnter(event: KeyboardEvent): void {
         <div
             class="relative flex flex-col rounded-xl border border-input bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30"
             :class="{
-                'border-primary border-dashed': isDraggingFiles,
+                'border-dashed border-primary': isDraggingFiles,
             }"
         >
             <div
@@ -237,6 +251,15 @@ function handleEnter(event: KeyboardEvent): void {
                 @update:model-value="emit('update:modelValue', String($event))"
                 @keydown.enter="handleEnter"
             />
+            <p
+                v-if="isLegislationDraftRequest"
+                class="border-t border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground"
+                role="status"
+                aria-live="polite"
+            >
+                Drafting legislation? Attach the relevant law, policy, template,
+                or background documents for Lexi to use as source material.
+            </p>
             <div class="flex items-center justify-between px-2 pb-2">
                 <div class="flex items-center gap-2">
                     <input
