@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'Welcome')->name('home');
 
-Route::middleware(['auth'])->group(function () {
+Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('new-chat', 'NewChat')->name('dashboard');
 
     Route::post('/threads', [ThreadController::class, 'store'])->name('threads.store');
