@@ -14,6 +14,7 @@ const props = withDefaults(
         files?: File[];
         processing?: boolean;
         error?: string;
+        retryable?: boolean;
         placeholder?: string;
         submitLabel?: string;
         centered?: boolean;
@@ -22,6 +23,7 @@ const props = withDefaults(
         files: () => [],
         processing: false,
         error: '',
+        retryable: false,
         placeholder: 'Type your message here...',
         submitLabel: 'Send',
         centered: false,
@@ -32,6 +34,7 @@ const emit = defineEmits<{
     'update:modelValue': [value: string];
     'update:files': [files: File[]];
     submit: [message: string, files: File[]];
+    retry: [];
 }>();
 
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -314,12 +317,23 @@ function handleEnter(event: KeyboardEvent): void {
                 </Button>
             </div>
         </div>
-        <p
+        <div
             v-if="props.error || fileError"
-            class="text-sm text-destructive"
+            class="flex items-center justify-between gap-3 text-sm text-destructive"
             role="alert"
         >
-            {{ fileError || props.error }}
-        </p>
+            <span>{{ fileError || props.error }}</span>
+            <Button
+                v-if="props.error && props.retryable"
+                type="button"
+                variant="outline"
+                size="sm"
+                class="shrink-0"
+                :disabled="props.processing"
+                @click="emit('retry')"
+            >
+                Retry
+            </Button>
+        </div>
     </form>
 </template>

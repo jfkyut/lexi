@@ -22,6 +22,12 @@ type ChatMessage = {
     attachments?: ChatAttachment[];
 };
 
+type RetryRequest = {
+    content: string;
+    messageId?: number;
+    files: File[];
+};
+
 const props = defineProps<{
     thread: {
         id: string;
@@ -40,6 +46,7 @@ const files = ref<File[]>([]);
 const processing = ref(false);
 const activity = ref('');
 const error = ref('');
+const retryRequest = ref<RetryRequest | null>(null);
 const conversation = ref<HTMLElement | null>(null);
 
 function scrollToBottom(): void {
@@ -87,6 +94,13 @@ async function sendMessage(
     if (processing.value) {
         return;
     }
+
+    const requestToRetry: RetryRequest = {
+        content: content ?? '',
+        messageId: existingMessageId,
+        files: submittedFiles,
+    };
+    retryRequest.value = requestToRetry;
 
     let assistantMessage: ChatMessage;
     let optimisticUserMessage: ChatMessage | undefined;
@@ -179,8 +193,13 @@ async function sendMessage(
         let lineBuffer = '';
         let eventName = 'update';
         let eventData: string[] = [];
+        let receivedDoneEvent = false;
 
         const dispatchEvent = (): void => {
+            if (eventName === 'done') {
+                receivedDoneEvent = true;
+            }
+
             if (eventData.length > 0) {
                 const data = eventData.join('\n');
 
@@ -223,6 +242,7 @@ async function sendMessage(
                         optimisticUserMessage.id = payload.id;
                         optimisticUserMessage.attachments =
                             payload.attachments ?? [];
+                        requestToRetry.messageId = payload.id;
                     }
                 }
 
@@ -257,29 +277,47 @@ async function sendMessage(
             }
         };
 
-        while (true) {
-            const { value, done } = await reader.read();
-            lineBuffer += decoder.decode(value, { stream: !done });
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                lineBuffer += decoder.decode(value, { stream: !done });
 
-            const lines = lineBuffer.split(/\r?\n/);
-            lineBuffer = lines.pop() ?? '';
+                const lines = lineBuffer.split(/\r?\n/);
+                lineBuffer = lines.pop() ?? '';
 
-            for (const line of lines) {
-                processLine(line);
-            }
-
-            if (done) {
-                if (lineBuffer !== '') {
-                    processLine(lineBuffer);
+                for (const line of lines) {
+                    processLine(line);
                 }
 
-                dispatchEvent();
-                break;
+                if (done) {
+                    if (lineBuffer !== '') {
+                        processLine(lineBuffer);
+                    }
+
+                    dispatchEvent();
+                    break;
+                }
             }
+        } finally {
+            reader.releaseLock();
         }
 
-        reader.releaseLock();
+        if (!receivedDoneEvent) {
+            throw new Error(
+                'The assistant response ended unexpectedly. Please try again.',
+            );
+        }
 
+        if (
+            !assistantMessage.content?.trim() &&
+            !assistantMessage.attachments?.length
+        ) {
+            throw new Error(
+                'The assistant did not return a response. Please try again.',
+            );
+        }
+
+        retryRequest.value = null;
         files.value = [];
 
         if (existingMessageId !== undefined) {
@@ -308,6 +346,21 @@ async function sendMessage(
 
 function submitMessage(content: string, submittedFiles: File[]): void {
     void sendMessage(content, undefined, submittedFiles);
+}
+
+function retryLastMessage(): void {
+    const request = retryRequest.value;
+
+    if (!request || processing.value) {
+        return;
+    }
+
+    if (request.messageId !== undefined) {
+        void sendMessage(undefined, request.messageId);
+        return;
+    }
+
+    void sendMessage(request.content, undefined, request.files);
 }
 
 onMounted(() => {
@@ -413,7 +466,9 @@ onMounted(() => {
             v-model:files="files"
             :processing="processing"
             :error="error"
+            :retryable="retryRequest !== null"
             @submit="submitMessage"
+            @retry="retryLastMessage"
         />
     </main>
 </template>
