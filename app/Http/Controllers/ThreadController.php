@@ -269,10 +269,11 @@ class ThreadController extends Controller
         $shouldSuggestTitle = $thread->title === 'New chat';
         $question = (string) ($userMessage->content ?? '');
         $shouldSearchLegislation = $this->shouldSearchLegislation($question);
-        $shouldSearchWeb = $this->shouldSearchWeb($question, $shouldSearchLegislation);
+        $requiresWebSearch = $this->explicitlyRequestsWebSearch($question) && ! $shouldSearchLegislation;
+        $shouldSearchWeb = $requiresWebSearch || $this->shouldSearchWebForCurrentInformation($question, $shouldSearchLegislation);
         $shouldGenerateFile = $this->shouldGenerateFile($question);
 
-        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $shouldSearchLegislation, $shouldSearchWeb, $shouldGenerateFile, $question, $thread): Generator {
+        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $shouldSearchLegislation, $shouldSearchWeb, $requiresWebSearch, $shouldGenerateFile, $question, $thread): Generator {
             $responseContent = $existingContent ?? '';
             $generatedPaths = [];
 
@@ -329,6 +330,7 @@ class ThreadController extends Controller
                             allowFileGeneration: $allowFileGeneration,
                             allowLegislationSearch: $allowLegislationSearch,
                             allowWebSearch: $allowWebSearch,
+                            requireWebSearch: $requiresWebSearch && $allowWebSearch,
                         ) as $streamEvent) {
                             if ($streamEvent instanceof LLMToolCall) {
                                 $toolCalls[] = $streamEvent;
@@ -503,12 +505,18 @@ class ThreadController extends Controller
         return $mentionsNumberedRecord || ($mentionsLegislation && $asksForRecordLookup);
     }
 
-    private function shouldSearchWeb(string $question, bool $shouldSearchLegislation): bool
+    private function explicitlyRequestsWebSearch(string $question): bool
     {
         $explicitWebSearch = preg_match(
-            '/\b(?:search|look up|browse|find|research|fact-check)\b.{0,40}\b(?:web|internet|online|sources?|citations?)\b|\b(?:cite|provide|include|link)\b.{0,30}\b(?:sources?|citations?|references?)\b/i',
+            '/\b(?:search|look\s+(?:it\s+)?up|browse|find|research|fact[- ]check|google|use|run|call|invoke)\b.{0,60}\b(?:the\s+)?(?:web|internet|online|google|search_web|search tool|browser)\b|\b(?:the\s+)?(?:web|internet|online|google|search_web|search tool|browser)\b.{0,60}\b(?:search|look\s+(?:it\s+)?up|browse|find|research|fact[- ]check)\b|\b(?:cite|provide|include|link)\b.{0,30}\b(?:sources?|citations?|references?)\b/i',
             $question,
         ) === 1;
+
+        return $explicitWebSearch;
+    }
+
+    private function shouldSearchWebForCurrentInformation(string $question, bool $shouldSearchLegislation): bool
+    {
         $volatileTopic = preg_match(
             '/\b(?:news|weather|price|exchange rate|stock|schedule|scores?)\b/i',
             $question,
@@ -521,7 +529,7 @@ class ThreadController extends Controller
         $currentInformation = ! $shouldSearchLegislation
             && ($volatileTopic || ($asksForRecentInformation && ! $asksForDateOrTime));
 
-        return $explicitWebSearch || $currentInformation;
+        return $currentInformation;
     }
 
     private function shouldGenerateFile(string $question): bool

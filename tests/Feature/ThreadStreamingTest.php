@@ -158,7 +158,7 @@ test('the assistant can search the web and include verified source links in its 
     $thread = $user->threads()->create(['title' => 'Web research']);
 
     $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
-        'message' => 'Find the recent public update and cite the source.',
+        'message' => 'Please do a web search for the recent public update.',
     ]);
 
     $response->assertOk();
@@ -196,7 +196,12 @@ test('the assistant can search the web and include verified source links in its 
                 fn (array $tool): bool => $tool['function']['name'] === 'search_web'
             )
             && collect($data['tools'])->pluck('function.name')->all() === ['search_web']
+            && $data['tool_choice'] === [
+                'type' => 'function',
+                'function' => ['name' => 'search_web'],
+            ]
             && str_contains($data['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
+            && str_contains($data['messages'][0]['content'], 'you must call search_web before answering')
             && str_contains($data['messages'][0]['content'], 'Do not browse for stable general knowledge or casual questions.');
     });
     Http::assertSent(function (ClientRequest $request): bool {
