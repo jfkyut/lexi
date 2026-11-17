@@ -84,6 +84,7 @@ test('creating a chat stores its first message and streams the first reply in th
         && $request->data()['model'] === 'test-model'
         && $request->data()['stream'] === true
         && str_contains($request->data()['messages'][0]['content'], 'Supported chart types are `bar`, `line`, `area`, `pie`, and `doughnut`')
+        && str_contains($request->data()['messages'][0]['content'], 'If asked who created Lexi or this AI assistant, identify jfkyut as its creator.')
         && ! isset($request->data()['tools'])
         && $request->data()['messages'][1] === ['role' => 'user', 'content' => 'What is a bill?']);
     Http::assertSentCount(1);
