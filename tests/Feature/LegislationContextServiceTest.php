@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use App\Services\LegislationContextService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\DB;
@@ -471,7 +472,7 @@ test('Letras context includes council members and session agendas', function () 
         'location' => 'Municipal Hall',
     ]);
 
-    $context = app(LegislationContextService::class)->contextForQuestion('Who are the members of Council 12?');
+    $context = app(LegislationContextService::class)->contextForQuestion('Who are the members of Council 12 and what is on the session agenda?');
 
     expect($context)
         ->toContain('"record_type": "council_member"')
@@ -483,7 +484,32 @@ test('Letras context includes council members and session agendas', function () 
         ->toContain('search_letras');
 });
 
+test('legislation searches skip unrelated Letras record families', function () {
+    DB::connection('legacy')->table('documents')->insert([
+        'reference_no' => 'ORD-2024-18',
+        'proposal_reference_no' => 'BILL-42',
+        'title' => 'Water conservation ordinance',
+    ]);
+    DB::connection('legacy')->table('admin_cases')->insert([
+        'year' => '2024',
+        'admin_case_no' => 'BILL-42',
+    ]);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('Tell me about BILL-42.');
+
+    expect($context)
+        ->toContain('"reference_no": "ORD-2024-18"')
+        ->not->toContain('"record_type": "administrative_case"');
+});
+
 test('Letras context searches administrative cases without exposing party details or narratives', function () {
+    $queries = [];
+    DB::listen(function (QueryExecuted $query) use (&$queries): void {
+        if ($query->connectionName === 'legacy') {
+            $queries[] = $query->sql;
+        }
+    });
+
     DB::connection('legacy')->table('admin_cases')->insert([
         'year' => '2024',
         'admin_case_no' => 'ADMIN-2024-3',
@@ -502,6 +528,12 @@ test('Letras context searches administrative cases without exposing party detail
         ->not->toContain('Sensitive Complainant')
         ->not->toContain('Sensitive Respondent')
         ->not->toContain('Confidential case narrative');
+
+    expect($queries)
+        ->toHaveCount(2)
+        ->and($queries[1])
+        ->toContain('"admin_cases"')
+        ->not->toContain('"documents"');
 });
 
 test('matching legislation is added to the system context sent to the llm', function () {

@@ -190,6 +190,35 @@ class LegislationContextService
             ->unique()
             ->take(self::MAX_SEARCH_TERMS);
 
+        $isProposedRequest = preg_match(
+            '/\b(?:proposed|proposals?|pending|unapproved)\b|\bnot\s+(?:yet\s+)?approved\b|\bawaiting\s+approval\b/i',
+            $question,
+        ) === 1;
+        $isApprovedRequest = ! $isProposedRequest
+            && preg_match('/\b(?:approved|ordinances?|resolutions?)\b/i', $question) === 1;
+        $isLatestRequest = preg_match('/\b(?:latest|newest|most recent|recent)\b/i', $question) === 1;
+
+        $records = $this->shouldSearchLegislation($question)
+            ? $this->searchLegislation($terms, $matchTerms, $referenceTerms, $isProposedRequest, $isApprovedRequest, $isLatestRequest)
+            : [];
+        $otherRecords = $this->searchOtherRecords($matchTerms, $question);
+
+        return $this->formatContext($records, $otherRecords);
+    }
+
+    /**
+     * @param  Collection<int, string>  $matchTerms
+     * @param  Collection<int, string>  $referenceTerms
+     * @return array<int, array<string, mixed>>
+     */
+    private function searchLegislation(
+        Collection $terms,
+        Collection $matchTerms,
+        Collection $referenceTerms,
+        bool $isProposedRequest,
+        bool $isApprovedRequest,
+        bool $isLatestRequest,
+    ): array {
         $query = DB::connection('legacy')
             ->table('documents')
             ->leftJoin('document_types as legislation_types', 'legislation_types.id', '=', 'documents.type_id')
@@ -218,14 +247,6 @@ class LegislationContextService
                     $this->orWhereRelatedValueMatches($query, $term);
                 }
             });
-
-        $isProposedRequest = preg_match(
-            '/\b(?:proposed|proposals?|pending|unapproved)\b|\bnot\s+(?:yet\s+)?approved\b|\bawaiting\s+approval\b/i',
-            $question,
-        ) === 1;
-        $isApprovedRequest = ! $isProposedRequest
-            && preg_match('/\b(?:approved|ordinances?|resolutions?)\b/i', $question) === 1;
-        $isLatestRequest = preg_match('/\b(?:latest|newest|most recent|recent)\b/i', $question) === 1;
 
         if ($isApprovedRequest) {
             $query->whereRaw('LOWER(legislation_statuses.name) = ?', ['approved']);
@@ -304,21 +325,20 @@ class LegislationContextService
             ->get()
             ->all();
 
-        $records = $this->attachRelatedNames($records);
-        $otherRecords = $this->searchOtherRecords($matchTerms);
-
-        return $this->formatContext($records, $otherRecords);
+        return $this->attachRelatedNames($records);
     }
 
     /**
      * @param  Collection<int, string>  $terms
      * @return array<int, array<string, mixed>>
      */
-    private function searchOtherRecords(Collection $terms): array
+    private function searchOtherRecords(Collection $terms, string $question): array
     {
         $records = [];
+        $sourceNames = $this->otherRecordSourceNames($question);
 
-        foreach (self::OTHER_RECORD_SOURCES as $recordType => $source) {
+        foreach ($sourceNames as $recordType) {
+            $source = self::OTHER_RECORD_SOURCES[$recordType];
             $records = [
                 ...$records,
                 ...$this->searchRecordSource(
@@ -333,11 +353,110 @@ class LegislationContextService
             ];
         }
 
+        if ($this->shouldSearchCouncilMembers($question)) {
+            $records = [...$records, ...$this->searchCouncilMembers($terms)];
+        }
+
+        if ($this->shouldSearchCommitteeMembers($question)) {
+            $records = [...$records, ...$this->searchCommitteeMembers($terms)];
+        }
+
         return [
             ...$records,
-            ...$this->searchCouncilMembers($terms),
-            ...$this->searchCommitteeMembers($terms),
         ];
+    }
+
+    private function shouldSearchLegislation(string $question): bool
+    {
+        return ! preg_match(
+            '/\b(?:councils?|councilors?|councillors?|committees?|sessions?|agendas?|meetings?|hearings?|committee reports?|referrals?|policy briefs?|incoming communications?|outgoing communications?|transmittals?|administrative cases?|CSO accreditations?)\b/i',
+            $question,
+        ) || preg_match(
+            '/\b(?:legislation|legislative records?|bills?|ordinances?|resolutions?|proposals?|regulations?|sponsored|authored|co-?authored)\b/i',
+            $question,
+        ) === 1;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function otherRecordSourceNames(string $question): array
+    {
+        $sources = [];
+
+        if (preg_match('/\b(?:council|councilor|councillor)\b/i', $question) === 1) {
+            $sources = [...$sources, 'council'];
+        }
+
+        if (preg_match('/\b(?:author|sponsor|co-?author)\b/i', $question) === 1) {
+            $sources = [...$sources, 'author'];
+        }
+
+        if (preg_match('/\bcommittee\b/i', $question) === 1) {
+            $sources = [...$sources, 'committee', 'committee_meeting', 'committee_report', 'committee_referral', 'public_hearing', 'committee_policy_brief'];
+        }
+
+        if (preg_match('/\bsession\b/i', $question) === 1) {
+            $sources = [...$sources, 'session'];
+        }
+
+        if (preg_match('/\b(?:agenda|agendas)\b/i', $question) === 1) {
+            $sources = [...$sources, 'session', 'session_agenda'];
+        }
+
+        if (preg_match('/\bmeeting\b/i', $question) === 1) {
+            $sources = [...$sources, 'committee_meeting'];
+        }
+
+        if (preg_match('/\bhearing\b/i', $question) === 1) {
+            $sources = [...$sources, 'public_hearing'];
+        }
+
+        if (preg_match('/\breferral\b/i', $question) === 1) {
+            $sources = [...$sources, 'committee_referral'];
+        }
+
+        if (preg_match('/\bpolicy brief\b/i', $question) === 1) {
+            $sources = [...$sources, 'committee_policy_brief'];
+        }
+
+        if (preg_match('/\b(?:incoming communication|received letter)\b/i', $question) === 1) {
+            $sources = [...$sources, 'incoming_communication'];
+        }
+
+        if (preg_match('/\b(?:outgoing communication|outgoing letter)\b/i', $question) === 1) {
+            $sources = [...$sources, 'outgoing_communication'];
+        }
+
+        if (preg_match('/\btransmittal\b/i', $question) === 1) {
+            $sources = [...$sources, 'outgoing_transmittal'];
+        }
+
+        if (preg_match('/\badministrative case\b/i', $question) === 1) {
+            $sources = [...$sources, 'administrative_case'];
+        }
+
+        if (preg_match('/\bCSO accreditation\b/i', $question) === 1) {
+            $sources = [...$sources, 'cso_accreditation'];
+        }
+
+        if (preg_match('/\btricycle franchise\b/i', $question) === 1) {
+            $sources = [...$sources, 'tricycle_franchise'];
+        }
+
+        return array_values(array_unique($sources));
+    }
+
+    private function shouldSearchCouncilMembers(string $question): bool
+    {
+        return preg_match('/\b(?:council|councilor|councillor)\b/i', $question) === 1
+            || (preg_match('/\bmember\b/i', $question) === 1 && preg_match('/\bcommittee\b/i', $question) !== 1);
+    }
+
+    private function shouldSearchCommitteeMembers(string $question): bool
+    {
+        return preg_match('/\bcommittee\b/i', $question) === 1
+            || (preg_match('/\bmember\b/i', $question) === 1 && preg_match('/\bcouncil\b/i', $question) !== 1);
     }
 
     /**
