@@ -268,12 +268,12 @@ class ThreadController extends Controller
 
         $shouldSuggestTitle = $thread->title === 'New chat';
         $question = (string) ($userMessage->content ?? '');
-        $shouldSearchLegislation = $this->shouldSearchLegislation($question);
-        $requiresWebSearch = $this->explicitlyRequestsWebSearch($question) && ! $shouldSearchLegislation;
-        $shouldSearchWeb = $requiresWebSearch || $this->shouldSearchWebForCurrentInformation($question, $shouldSearchLegislation);
+        $shouldSearchLetras = $this->shouldSearchLetras($question);
+        $requiresWebSearch = $this->explicitlyRequestsWebSearch($question) && ! $shouldSearchLetras;
+        $shouldSearchWeb = $requiresWebSearch || $this->shouldSearchWebForCurrentInformation($question, $shouldSearchLetras);
         $shouldGenerateFile = $this->shouldGenerateFile($question);
 
-        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $shouldSearchLegislation, $shouldSearchWeb, $requiresWebSearch, $shouldGenerateFile, $question, $thread): Generator {
+        return response()->eventStream(function () use ($historyMessages, $userMessage, $assistantMessage, $existingContent, $shouldSuggestTitle, $shouldSearchLetras, $shouldSearchWeb, $requiresWebSearch, $shouldGenerateFile, $question, $thread): Generator {
             $responseContent = $existingContent ?? '';
             $generatedPaths = [];
 
@@ -301,7 +301,7 @@ class ThreadController extends Controller
 
                     $context = null;
 
-                    if ($shouldSearchLegislation) {
+                    if ($shouldSearchLetras) {
                         yield new StreamedEvent('activity', [
                             'message' => 'Preparing relevant context',
                         ]);
@@ -319,7 +319,7 @@ class ThreadController extends Controller
                                 : 'Reviewing results and preparing your answer',
                         ]);
                         $allowFileGeneration = $shouldGenerateFile && ! isset($usedToolNames['generate_file']);
-                        $allowLegislationSearch = $shouldSearchLegislation && ! isset($usedToolNames['search_legislation']);
+                        $allowLetrasSearch = $shouldSearchLetras && ! isset($usedToolNames['search_letras']);
                         $allowWebSearch = $shouldSearchWeb && ! isset($usedToolNames['search_web']);
                         $toolCalls = [];
                         $isWritingResponse = false;
@@ -328,7 +328,7 @@ class ThreadController extends Controller
                             $history,
                             context: $context,
                             allowFileGeneration: $allowFileGeneration,
-                            allowLegislationSearch: $allowLegislationSearch,
+                            allowLetrasSearch: $allowLetrasSearch,
                             allowWebSearch: $allowWebSearch,
                             requireWebSearch: $requiresWebSearch && $allowWebSearch,
                         ) as $streamEvent) {
@@ -362,7 +362,7 @@ class ThreadController extends Controller
                         $toolCall = $toolCalls[0];
                         $toolIsAvailable = match ($toolCall->name) {
                             'generate_file' => $allowFileGeneration,
-                            'search_legislation' => $allowLegislationSearch,
+                            'search_letras' => $allowLetrasSearch,
                             'search_web' => $allowWebSearch,
                             default => false,
                         };
@@ -379,15 +379,15 @@ class ThreadController extends Controller
                             'tool_calls' => [$toolCall->requestData()],
                         ];
 
-                        if ($toolCall->name === 'search_legislation') {
+                        if ($toolCall->name === 'search_letras') {
                             $query = $toolCall->arguments['query'] ?? null;
 
                             if (! is_string($query) || trim($query) === '' || mb_strlen($query) > 500) {
-                                throw new RuntimeException('The LLM returned an invalid legislation search query.');
+                                throw new RuntimeException('The LLM returned an invalid Letras search query.');
                             }
 
                             yield new StreamedEvent('activity', [
-                                'message' => 'Searching legislative records',
+                                'message' => 'Searching Letras records',
                             ]);
                             $toolResult = $this->legislationContextService->contextForQuestion(trim($query));
                         } elseif ($toolCall->name === 'search_web') {
@@ -487,14 +487,14 @@ class ThreadController extends Controller
         abort_unless($request->user()?->id === $thread->user_id, 404);
     }
 
-    private function shouldSearchLegislation(string $question): bool
+    private function shouldSearchLetras(string $question): bool
     {
-        $mentionsLegislation = preg_match(
-            '/\b(?:legislation|legislative records?|bills?|ordinances?|resolutions?|proposals?|regulations?)\b/i',
+        $mentionsLetrasRecord = preg_match(
+            '/\b(?:legislation|legislative records?|bills?|ordinances?|resolutions?|proposals?|regulations?|authors?|councils?(?:\s+members?)?|committees?(?:\s+members?)?|sessions?|agendas?|meetings?|hearings?|committee reports?|referrals?|policy briefs?|incoming communications?|outgoing communications?|transmittals?|administrative cases?|CSO accreditations?|tricycle franchises?)\b/i',
             $question,
         ) === 1;
         $asksForRecordLookup = preg_match(
-            '/\b(?:find|search|look up|show|list|which|who|when|how many|latest|newest|most recent|approved|proposed|pending|sponsored|authored|status|reference)\b/i',
+            '/\b(?:find|search|look up|show|list|which|who|when|how many|latest|newest|most recent|current|upcoming|scheduled|approved|proposed|pending|sponsored|authored|status|reference|member|about|details?)\b/i',
             $question,
         ) === 1;
         $mentionsNumberedRecord = preg_match(
@@ -502,7 +502,7 @@ class ThreadController extends Controller
             $question,
         ) === 1;
 
-        return $mentionsNumberedRecord || ($mentionsLegislation && $asksForRecordLookup);
+        return $mentionsNumberedRecord || ($mentionsLetrasRecord && $asksForRecordLookup);
     }
 
     private function explicitlyRequestsWebSearch(string $question): bool
@@ -515,7 +515,7 @@ class ThreadController extends Controller
         return $explicitWebSearch;
     }
 
-    private function shouldSearchWebForCurrentInformation(string $question, bool $shouldSearchLegislation): bool
+    private function shouldSearchWebForCurrentInformation(string $question, bool $shouldSearchLetras): bool
     {
         $volatileTopic = preg_match(
             '/\b(?:news|weather|price|exchange rate|stock|schedule|scores?)\b/i',
@@ -526,7 +526,7 @@ class ThreadController extends Controller
             $question,
         ) === 1;
         $asksForDateOrTime = preg_match('/\b(?:date|time|year)\b/i', $question) === 1;
-        $currentInformation = ! $shouldSearchLegislation
+        $currentInformation = ! $shouldSearchLetras
             && ($volatileTopic || ($asksForRecentInformation && ! $asksForDateOrTime));
 
         return $currentInformation;

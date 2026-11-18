@@ -100,6 +100,34 @@ beforeEach(function () {
         $table->unsignedBigInteger('document_id');
         $table->unsignedBigInteger('committee_id');
     });
+
+    $otherRecordColumns = [
+        'council_members' => ['author_id', 'council_id', 'position', 'start', 'end'],
+        'committee_members' => ['committee_id', 'author_id', 'position', 'start', 'end'],
+        'sessions' => ['council_id', 'year', 'session_no', 'date', 'session_time', 'remarks'],
+        'session_agendas' => ['session_id', 'privilege_hour', 'announcement', 'adjournment', 'location', 'custom_invocation', 'remarks'],
+        'committee_meetings' => ['council_id', 'year', 'month', 'sequence_no', 'meeting_no', 'date', 'topic', 'remarks'],
+        'committee_reports' => ['council_id', 'year', 'month', 'sequence_no', 'reference_no', 'subject', 'date_calendared', 'action_taken', 'incoming_reference_no'],
+        'committee_referrals' => ['council_id', 'year', 'reference_no', 'type', 'priority', 'meeting_date', 'date_referred', 'subject', 'status_id'],
+        'committee_public_hearings' => ['council_id', 'year', 'public_hearing_no', 'date', 'venue', 'topic', 'remarks'],
+        'committee_policy_briefs' => ['council_id', 'year', 'reference_no', 'subject', 'remarks'],
+        'incoming_communications' => ['classification', 'year', 'reference_no', 'record_no', 'date_received', 'category_id'],
+        'outgoing_communications' => ['year', 'classification', 'date_of_letter', 'subject', 'file_no', 'record_no', 'date_received'],
+        'outgoing_transmittals' => ['year', 'month', 'sequence_no', 'reference_no', 'subject', 'date_sent', 'status'],
+        'admin_cases' => ['council_id', 'year', 'admin_case_no', 'date_filed', 'name_of_complainant', 'respondent', 'summary'],
+        'cso_accreditations' => ['council_id', 'year', 'reference_no', 'organization_name', 'resolution_no', 'classification', 'status', 'incoming_reference_no'],
+        'tricycle_franchises' => ['application_no', 'vehicle_type', 'denomination', 'application_date', 'inspection_date', 'resolution_no', 'franchise_no', 'date_released'],
+    ];
+
+    foreach ($otherRecordColumns as $tableName => $columns) {
+        Schema::connection('legacy')->create($tableName, function (Blueprint $table) use ($columns): void {
+            $table->id();
+
+            foreach ($columns as $column) {
+                $table->text($column)->nullable();
+            }
+        });
+    }
 });
 
 test('legislation context includes matching reference numbers and titles', function () {
@@ -122,7 +150,7 @@ test('legislation context includes matching reference numbers and titles', funct
         ->toContain('"proposal_number": "BILL-42"')
         ->toContain('always show both and label them exactly as reference_no (final legislation number) and proposal_reference_no (proposal number)')
         ->toContain('These are different identifiers: never treat them as interchangeable.')
-        ->toContain('metadata, not the full text');
+        ->toContain('metadata, not the full text of legislation');
 });
 
 test('legislation context includes all matching records within the context budget', function () {
@@ -348,7 +376,7 @@ test('legislation context orders latest proposed matches by year and numeric seq
 test('legislation context explicitly says when there are no matching records', function () {
     $context = app(LegislationContextService::class)->contextForQuestion('What is completely unknown?');
 
-    expect($context)->toContain('No matching legislation records were found.');
+    expect($context)->toContain('No matching Letras records were found.');
 });
 
 test('legislation context includes named authors sponsors committee sponsors and council', function () {
@@ -411,6 +439,71 @@ test('legislation context includes named authors sponsors committee sponsors and
         ->toContain('"proposal_co_authors"');
 });
 
+test('Letras context includes council members and session agendas', function () {
+    DB::connection('legacy')->table('councils')->insert([
+        'id' => 12,
+        'number' => 'Council 12',
+        'start' => '2024-01-01',
+        'end' => '2027-01-01',
+    ]);
+    DB::connection('legacy')->table('authors')->insert([
+        'id' => 'author-12',
+        'first_name' => 'Jordan',
+        'last_name' => 'Rivera',
+    ]);
+    DB::connection('legacy')->table('council_members')->insert([
+        'author_id' => 'author-12',
+        'council_id' => '12',
+        'position' => 'Councilor',
+        'start' => '2024-01-01',
+        'end' => '2027-01-01',
+    ]);
+    DB::connection('legacy')->table('sessions')->insert([
+        'id' => 3,
+        'council_id' => '12',
+        'year' => '2025',
+        'session_no' => 'Regular Session 4',
+        'date' => '2025-02-01',
+    ]);
+    DB::connection('legacy')->table('session_agendas')->insert([
+        'session_id' => '3',
+        'announcement' => 'Council 12 water conservation program',
+        'location' => 'Municipal Hall',
+    ]);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('Who are the members of Council 12?');
+
+    expect($context)
+        ->toContain('"record_type": "council_member"')
+        ->toContain('"name": "Jordan Rivera"')
+        ->toContain('"position": "Councilor"')
+        ->toContain('"council_number": "Council 12"')
+        ->toContain('"record_type": "session_agenda"')
+        ->toContain('Council 12 water conservation program')
+        ->toContain('search_letras');
+});
+
+test('Letras context searches administrative cases without exposing party details or narratives', function () {
+    DB::connection('legacy')->table('admin_cases')->insert([
+        'year' => '2024',
+        'admin_case_no' => 'ADMIN-2024-3',
+        'date_filed' => '2024-04-15',
+        'name_of_complainant' => 'Sensitive Complainant',
+        'respondent' => 'Sensitive Respondent',
+        'summary' => 'Confidential case narrative',
+    ]);
+
+    $context = app(LegislationContextService::class)->contextForQuestion('Find administrative case ADMIN-2024-3.');
+
+    expect($context)
+        ->toContain('"record_type": "administrative_case"')
+        ->toContain('ADMIN-2024-3')
+        ->toContain('2024-04-15')
+        ->not->toContain('Sensitive Complainant')
+        ->not->toContain('Sensitive Respondent')
+        ->not->toContain('Confidential case narrative');
+});
+
 test('matching legislation is added to the system context sent to the llm', function () {
     Http::preventStrayRequests();
 
@@ -454,14 +547,13 @@ test('matching legislation is added to the system context sent to the llm', func
 
     Http::assertSent(fn (ClientRequest $request): bool => $request->data()['messages'][0]['role'] === 'system'
         && str_contains($request->data()['messages'][0]['content'], 'AI assistant serving the Legislative Office of the Local Government Unit (LGU) of San Vicente, Palawan.')
-        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_legislation']
-        && str_contains($request->data()['messages'][0]['content'], 'The connected legacy legislative records database is called Letras.')
-        && str_contains($request->data()['messages'][0]['content'], 'When a user asks about records in Letras, they mean the connected legislative records available through the search_legislation tool.')
+        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_letras']
+        && str_contains($request->data()['messages'][0]['content'], 'The connected legacy records database is called Letras.')
         && str_contains($request->data()['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
-        && str_contains($request->data()['messages'][0]['content'], 'but not for general explanations of laws or legal concepts.')
-        && str_contains($request->data()['messages'][0]['content'], 'interpret that as a database lookup')
-        && str_contains($request->data()['messages'][0]['content'], 'Do not call search_web to locate, confirm, or supplement local legislative record existence, status, or metadata.')
-        && $request->data()['tools'][0]['function']['description'] === 'Search the connected local legislative records database for proposed, pending, or approved records and their metadata. Use this instead of web search for local legislative record lookups.'
+        && str_contains($request->data()['messages'][0]['content'], 'not for general explanations of laws or legal concepts.')
+        && str_contains($request->data()['messages'][0]['content'], 'Use search_letras for specific record lookups')
+        && str_contains($request->data()['messages'][0]['content'], 'do not use search_web to locate, confirm, or supplement them')
+        && $request->data()['tools'][0]['function']['description'] === 'Search the connected local Letras database for legislation, governance, and other supported record metadata. Use this instead of web search for local record lookups.'
         && str_contains($request->data()['messages'][0]['content'], 'BILL-42')
         && str_contains($request->data()['messages'][0]['content'], 'Riverside water protection')
         && str_contains($request->data()['messages'][0]['content'], 'These are different identifiers: never treat them as interchangeable.')
@@ -472,6 +564,52 @@ test('matching legislation is added to the system context sent to the llm', func
             'role' => 'user',
             'content' => 'Search proposed legislation about Riverside water protection.',
         ]);
+});
+
+test('council member questions search Letras without requesting web results', function () {
+    Http::preventStrayRequests();
+
+    config([
+        'services.llm.url' => 'https://llm.test/v1/chat/completions',
+        'services.llm.key' => 'test-key',
+        'services.llm.model' => 'test-model',
+    ]);
+
+    Http::fake([
+        'https://llm.test/v1/chat/completions' => Http::response(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Jordan Rivera is a council member.\"}}]}\n\n".
+            "data: [DONE]\n\n",
+            200,
+            ['Content-Type' => 'text/event-stream'],
+        ),
+    ]);
+
+    DB::connection('legacy')->table('councils')->insert([
+        'id' => 12,
+        'number' => 'Council 12',
+    ]);
+    DB::connection('legacy')->table('authors')->insert([
+        'id' => 'author-12',
+        'first_name' => 'Jordan',
+        'last_name' => 'Rivera',
+    ]);
+    DB::connection('legacy')->table('council_members')->insert([
+        'author_id' => 'author-12',
+        'council_id' => '12',
+        'position' => 'Councilor',
+    ]);
+
+    $user = User::factory()->create();
+    $thread = $user->threads()->create(['title' => 'Council question']);
+    $response = $this->actingAs($user)->post(route('threads.messages.store', $thread), [
+        'message' => 'Who are the current members of Council 12?',
+    ]);
+
+    $response->assertOk();
+    expect($response->streamedContent())->toContain('Jordan Rivera is a council member.');
+
+    Http::assertSent(fn (ClientRequest $request): bool => collect($request->data()['tools'])->pluck('function.name')->all() === ['search_letras']
+        && str_contains($request->data()['messages'][0]['content'], '"name": "Jordan Rivera"'));
 });
 
 test('the llm can search additional legislation records and use the results in its reply', function () {
@@ -506,7 +644,7 @@ test('the llm can search additional legislation records and use the results in i
                             'id' => 'call_legislation_search',
                             'type' => 'function',
                             'function' => [
-                                'name' => 'search_legislation',
+                                'name' => 'search_letras',
                                 'arguments' => $arguments,
                             ],
                         ]],
@@ -537,8 +675,8 @@ test('the llm can search additional legislation records and use the results in i
         ->not->toContain('event: error');
 
     Http::assertSent(fn (ClientRequest $request): bool => isset($request->data()['tools'][0]['function'])
-        && $request->data()['tools'][0]['function']['name'] === 'search_legislation'
-        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_legislation']
+        && $request->data()['tools'][0]['function']['name'] === 'search_letras'
+        && collect($request->data()['tools'])->pluck('function.name')->all() === ['search_letras']
         && str_contains($request->data()['messages'][0]['content'], 'Tools are optional. Do not call a tool just because it is available')
         && str_contains($request->data()['messages'][0]['content'], 'Never claim you cannot access or search the connected records'));
 

@@ -7,15 +7,20 @@ supported attachments, and create downloadable documents.
 ## Features
 
 - Authenticated conversations with streamed assistant responses.
-- Legislative-record lookup through a connected, read-only MariaDB database.
+- Read-only Letras lookup across legislation, councils and members, committees,
+  sessions, hearings, reports, official workflow records, and other supported
+  local record metadata.
 - On-demand web research with clickable source citations.
 - Attachment support for images, PDFs, DOCX, and text files.
 - Downloadable PDF, DOCX, and Excel workbook generation when requested.
 - Conversation and attachment storage in the application database.
 
-Legislative search returns records and metadata, not the complete text of laws.
-The assistant should not be treated as a substitute for legal advice or as a
-source of unverified legal provisions.
+Letras search returns selected metadata, not the complete text of laws,
+correspondence, administrative case narratives, or attachments. Contact details
+and private-party/applicant fields are excluded from the assistant's search
+context; public legislative authors and council/committee members are included
+with their official roles. The assistant should not be treated as a substitute
+for legal advice or as a source of unverified legal provisions.
 
 ## Requirements
 
@@ -27,7 +32,7 @@ source of unverified legal provisions.
   for Laravel.
 - Access to an OpenAI-compatible chat-completions API.
 - A Tavily API key for on-demand web search.
-- Access to the legacy MariaDB database for legislative search.
+- Access to the legacy MariaDB database for read-only local record searches.
 
 ## Setup
 
@@ -74,12 +79,14 @@ Set these values in `.env`:
 | `LEGACY_DB_PASSWORD` | Password for that account. |
 
 The `legacy` connection is separate from the application database. Use a
-read-only database account for it. Legislative search expects the existing
-legacy schema, including its documents, statuses, types, authors, sponsors,
-committees, and council records. Without a working LLM configuration, chat
-responses cannot be generated; without the legacy connection, legislative
-lookup is unavailable. Without a working Tavily key, external web searches
-cannot be completed.
+read-only database account for it. Letras search expects the existing legacy
+schema for legislation, councils and members, committees, sessions, committee
+records, communications, transmittals, administrative case metadata, CSO
+accreditations, and tricycle franchise metadata. It excludes private user and
+personnel records, private-party/contact fields, and attachment contents. Without a
+working LLM configuration, chat responses cannot be generated; without the
+legacy connection, local record lookup is unavailable. Without a working
+Tavily key, external web searches cannot be completed.
 
 Do not commit `.env` or put API keys and database credentials in source
 control.
